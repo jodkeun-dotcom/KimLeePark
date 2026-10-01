@@ -1,0 +1,13 @@
+data/
+outputs/
+*.csv
+*.csv.gz
+*.xlsx
+*.xls
+*.parquet
+*.zip
+.env*
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
