@@ -52,7 +52,7 @@
 - Git
 - 공모전에서 제공받은 데이터 파일
 
-아래 명령은 분석 코드와 `requirements.txt`가 저장소에 업로드된 이후 실행할 수 있습니다.
+아래 명령으로 저장소에 포함된 전처리 코드와 결합 검사를 실행할 수 있습니다.
 
 ### 저장소 다운로드 및 패키지 설치
 
@@ -68,10 +68,10 @@ python -m pip install -r requirements.txt
 
 ```text
 data/
-├── raw/
-│   ├── skt/          # SKT 원본 CSV 파일
-│   └── card/         # 신한카드 원본 파일
-└── processed/        # 정제 및 결합 결과
+├── skt/              # SKT 압축 CSV (12월 지정 파일 중복 제거)
+├── shinhan/          # 신한카드 원본 압축 TXT
+├── layouts/          # 제공기관 레이아웃 설명서
+└── processed/        # 월별 요약·점검표 및 로컬 정제 결과
 ```
 
 제공 데이터는 [data 폴더](data/README.md)에 압축 형식으로 정리했습니다. SKT 12월 시간대·요일별 파일은 완전 중복을 제거했으며, 파일 구성과 읽는 방법은 해당 안내를 참고합니다.
@@ -81,16 +81,16 @@ data/
 ```bash
 # SKT 유동인구 정리 및 월별 요약
 python scripts/prepare_skt.py \
-  --input data/raw/skt \
+  --input data/skt \
   --output data/processed/skt
 
 # 신한카드 데이터1 정리
 python scripts/prepare_card.py \
-  --input data/raw/card/data1.txt \
+  --input data/shinhan/shinhan_card_data1.txt.gz \
   --output data/processed/card
 ```
 
-`data1.txt`는 예시 파일명이며 실제 제공받은 파일 경로로 변경합니다.
+위 명령은 저장소에 포함된 압축 데이터를 사용합니다. SKT는 원래 CSV 폴더도 입력할 수 있습니다. [10월 1일 결과 목록](docs/status_1001.md)에서 업로드된 파일과 확인 대기 항목을 확인할 수 있습니다.
 
 ### 결합 코드 검사
 

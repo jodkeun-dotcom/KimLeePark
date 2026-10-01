@@ -34,6 +34,8 @@
 
 월별 없는 격자를 0으로 채우지 않는다. 공통 격자도 지역 전체를 대표한다고 가정하지 않는다. 요일 지표의 합을 실제 월 방문 횟수로 해석하지 않는다.
 
+요약 파일은 `data/processed/skt/`에 있다. `quality.csv`의 input_rows는 이번 실행의 입력 행수, removed_rows는 이번 실행에서 제거한 중복 수, clean_rows는 출력 행수다. 저장소의 입력 파일은 이미 중복 제거되어 이번 removed_rows는 0이다. 최초 원본의 중복 제거 기록은 `source_dedup_quality.csv` 및 `data/manifest.json`을 참고한다. `source_dedup_quality.csv`의 raw_rows/removed_rows/clean_rows는 최초 처리 전·제거·처리 후 행수이며 null_cells, remaining_duplicate_keys, negative_values는 최초 정제 자료 점검 결과다.
+
 ## 카드 정제 자료
 
 신한 데이터1(탭 구분, 기본 CP949), 춘천 개인카드만 사용한다. 법인은 제외하고 성별·시간대를 합산한다. 데이터2와 합산하지 않는다.
