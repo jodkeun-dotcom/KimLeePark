@@ -56,7 +56,7 @@
 
 | 파일 | 필수 열 / 조건 |
 |---|---|
-| 기상 | date, region 및 기상 변수. date+region당 한 행. 관측소 선택·단위·결측 처리·출처는 작성자가 명시 |
+| 기상 | date, region 및 기상 변수 ([춘천 ASOS 정제 자료 설명](weather.md)). date+region당 한 행. 관측소 선택·단위·결측 처리·출처는 작성자가 명시 |
 | 달력 | date, is_holiday(0/1). 분석 기간 전체 날짜 포함. holiday_name, is_substitute 등 추가 가능 |
 | SKT 지역표 | prefix, region, status, source. 제공기관 확인 후에만 status=confirmed. source에는 확인 자료 또는 답변 일자 기록 |
 

@@ -20,14 +20,19 @@
 
 - [체크리스트](docs/status_1001.md)
 - [정제 데이터 변수 설명 및 팀 결합 형식](docs/variables.md)
+- [기상자료 변수 설명](docs/weather.md)
 
 ## 파일 구성
 
 ```text
 scripts/prepare_skt.py   # 중복 제거, 월별 프로파일, 공통 격자 비교
 scripts/prepare_card.py  # 춘천 개인카드 일별·월별 집계
+scripts/prepare_weather.py # 춘천 ASOS 일별 기상 (CP949 → 영문 열, UTF-8)
+scripts/label_weather_events.py # 체감온도·폭염/호우/폭설 라벨, 사건·분석기간 표, 타임라인
+notebook/data_read.ipynb # 기상자료 pandas 읽기 확인
 scripts/join_data.py     # 일별 기상·달력 결합 / 별도 월별 SKT 결합
 tests/test_join_data.py  # 가상자료로 중복·누락·지역 확인 조건 검증
+tests/test_weather_events.py # 사건 묶기·적설 결측·분석기간 검증
 docs/                   # 변수 설명 및 진행상황
 ```
 
@@ -40,6 +45,8 @@ python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
 python scripts/prepare_skt.py --input data/raw/skt --output data/processed/skt
 python scripts/prepare_card.py --input data/raw/card/data1.txt --output data/processed/card
+python scripts/prepare_weather.py --input data/raw/wether/OBS_ASOS_DD_20261001161226.csv --output data/processed/weather.csv
+python scripts/label_weather_events.py
 ```
 
 SKT 입력 파일은 `flow_age_pop_202507.csv` 형식으로 age/time/wkdy 각각 7~12월 총 18개가 필요하다. 실제 12월 시간대 파일명은 `flow_time_pop_202512.csv`다. 원본은 변경하지 않는다.
