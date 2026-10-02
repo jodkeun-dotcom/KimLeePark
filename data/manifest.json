@@ -1,4 +1,9 @@
 {
+  "storage": {
+    "data_files_in_repository": false,
+    "path_base": "data/",
+    "note": "Inventory of previously validated local packages; listed files are not bundled. sha256 and bytes refer to those packages; source_sha256 refers to original uncompressed inputs where provided."
+  },
   "files": [
     {
       "file": "skt/flow_age_pop_202507.csv.gz",

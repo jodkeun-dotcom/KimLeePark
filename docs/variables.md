@@ -2,7 +2,7 @@
 
 조은 담당 공유용. 세은·선하의 실제 정제 파일은 아직 이 저장소에서 검증하지 않았으며, 기상·공휴일 항목은 결합을 위한 제안 형식이다.
 
-기상자료는 세은, 공휴일 목록은 선하가 GitHub에 공유할 예정이다. 업로드 후 실제 경로·열 이름·단위를 확인하고 아래 형식에 맞춰 연결한다. 현재는 팀 자료 결합 전이며, 실행 절차는 [데이터 결합 안내](data_join.md)를 참고한다.
+기상자료는 세은, 공휴일 목록은 선하가 준비한다. 원본·정제 자료는 제공 조건에 맞는 팀 공유 경로로 전달하고 로컬에 배치한다. 실제 경로·열 이름·단위를 확인하고 아래 형식에 맞춰 연결한다. 현재는 팀 자료 결합 전이며, 실행 절차는 [데이터 결합 안내](data_join.md)를 참고한다.
 
 ## SKT 원본 → 정제 자료
 
@@ -34,7 +34,7 @@
 
 월별 없는 격자를 0으로 채우지 않는다. 공통 격자도 지역 전체를 대표한다고 가정하지 않는다. 요일 지표의 합을 실제 월 방문 횟수로 해석하지 않는다.
 
-요약 파일은 `data/processed/skt/`에 있다. `quality.csv`의 input_rows는 이번 실행의 입력 행수, removed_rows는 이번 실행에서 제거한 중복 수, clean_rows는 출력 행수다. 저장소의 입력 파일은 이미 중복 제거되어 이번 removed_rows는 0이다. 최초 원본의 중복 제거 기록은 `source_dedup_quality.csv` 및 `data/manifest.json`을 참고한다. `source_dedup_quality.csv`의 raw_rows/removed_rows/clean_rows는 최초 처리 전·제거·처리 후 행수이며 null_cells, remaining_duplicate_keys, negative_values는 최초 정제 자료 점검 결과다.
+요약 파일은 전처리 실행 후 로컬 `data/processed/skt/`에 생성되며 Git에는 포함하지 않는다. `quality.csv`의 input_rows는 이번 실행의 입력 행수, removed_rows는 이번 실행에서 제거한 중복 수, clean_rows는 출력 행수다. 이미 중복 제거한 입력이면 removed_rows는 0이고, 원본 입력이면 지정된 12월 중복을 제거한다. 최초 파일별 검증 기록은 `data/manifest.json`의 source_rows, removed_exact_duplicates, rows를 참고한다. 과거 `source_dedup_quality.csv`는 최초 점검 당시 로컬 산출물이며 현재 전처리 명령이 새로 생성하는 파일은 아니다.
 
 ## 카드 정제 자료
 

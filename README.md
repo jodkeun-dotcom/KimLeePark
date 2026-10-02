@@ -52,7 +52,7 @@
 - Git
 - 공모전에서 제공받은 데이터 파일
 
-아래 명령으로 저장소에 포함된 전처리 코드와 결합 검사를 실행할 수 있습니다.
+제공 원본·레이아웃·정제 데이터는 저장소에 포함하지 않습니다. 전처리 전에 참가자가 제공받은 입력 파일을 로컬에 준비해야 합니다. 가상자료 결합 검사는 제공 데이터 없이 실행할 수 있습니다.
 
 ### 저장소 다운로드 및 패키지 설치
 
@@ -64,17 +64,19 @@ python -m pip install -r requirements.txt
 
 ### 데이터 준비
 
-제공받은 파일을 로컬 환경의 다음 경로에 보관합니다.
+제공받은 파일을 로컬 환경의 다음 경로에 보관합니다. `data/README.md`와 `data/manifest.json`만 Git으로 관리하고, 나머지 `data/` 하위 파일은 `.gitignore`로 제외합니다.
 
 ```text
 data/
-├── skt/              # SKT 압축 CSV (12월 지정 파일 중복 제거)
-├── shinhan/          # 신한카드 원본 압축 TXT
-├── layouts/          # 제공기관 레이아웃 설명서
-└── processed/        # 월별 요약·점검표 및 로컬 정제 결과
+├── README.md         # 입력 준비 안내 (Git 관리)
+├── manifest.json     # 파일명·행수·해시 등 메타정보 (Git 관리)
+├── skt/              # 로컬 SKT 원본 CSV 또는 CSV.GZ
+├── shinhan/          # 로컬 신한카드 원본 TXT 또는 TXT.GZ
+├── layouts/          # 로컬 제공기관 레이아웃 설명서
+└── processed/        # 코드 실행으로 생성하는 로컬 정제 결과
 ```
 
-제공 데이터는 [data 폴더](data/README.md)에 압축 형식으로 정리했습니다. SKT 12월 시간대·요일별 파일은 완전 중복을 제거했으며, 파일 구성과 읽는 방법은 해당 안내를 참고합니다.
+SKT 원본 18개를 `data/skt/`에 준비합니다. 신한카드 데이터1은 아래 예시에서 `data/shinhan/shinhan_card_data1.txt`로 복사해 사용합니다. 원래 파일명을 유지한다면 명령의 `--input`을 실제 경로로 바꾸면 됩니다. 자세한 파일 구성과 중복 제거 기준은 [데이터 준비 안내](data/README.md)를 참고합니다.
 
 ### 전처리 실행
 
@@ -86,11 +88,11 @@ python scripts/prepare_skt.py \
 
 # 신한카드 데이터1 정리
 python scripts/prepare_card.py \
-  --input data/shinhan/shinhan_card_data1.txt.gz \
+  --input data/shinhan/shinhan_card_data1.txt \
   --output data/processed/card
 ```
 
-위 명령은 저장소에 포함된 압축 데이터를 사용합니다. SKT는 원래 CSV 폴더도 입력할 수 있습니다. [10월 1일 결과 목록](docs/status_1001.md)에서 업로드된 파일과 확인 대기 항목을 확인할 수 있습니다.
+위 명령은 로컬에 준비한 입력을 사용합니다. 두 전처리 코드는 압축된 CSV.GZ/TXT.GZ도 지원합니다. SKT 코드는 지정된 12월 파일의 완전 중복을 제거하며, 이미 중복 제거된 입력이면 추가 제거 행수는 0입니다. 출력은 `data/processed/`에 생성되며 Git에 포함하지 않습니다. [10월 1일 결과 목록](docs/status_1001.md)에서 검증 기록과 확인 대기 항목을 확인할 수 있습니다.
 
 ### 결합 코드 검사
 
