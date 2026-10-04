@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+import json
 
 import numpy as np
 import pandas as pd
@@ -141,6 +142,60 @@ class BaselineTests(unittest.TestCase):
             read = pd.read_csv(out/'daily_predictions.csv')
             self.assertEqual(len(read), len(d))
             self.assertIn('missing_policy_sensitivity.csv', [p.name for p in out.iterdir()])
+
+    def test_retrospective_on_then_off_removes_only_owned_optional_output(self):
+        r, d, v = b.calculate(self.panel(), events(), windows(events()), primary=set(), retrospective=True)
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td)
+            b.write_outputs(out, r, d, v, 'first_calendar')
+            self.assertTrue((out/'retrospective_sensitivity.csv').is_file())
+            self.assertTrue(json.loads((out/'run_metadata.json').read_text())['retrospective_enabled'])
+            unrelated = out/'user_notes.csv'; unrelated.write_text('keep me')
+            r2 = r.loc[r.baseline_mode.eq('fixed_pre_event')]
+            d2 = d.loc[d.baseline_mode.eq('fixed_pre_event')]
+            b.write_outputs(out, r2, d2, v, 'second_calendar')
+            self.assertFalse((out/'retrospective_sensitivity.csv').exists())
+            self.assertEqual(unrelated.read_text(), 'keep me')
+            meta = json.loads((out/'run_metadata.json').read_text())
+            self.assertFalse(meta['retrospective_enabled'])
+            self.assertEqual(meta['calendar_provenance'], 'second_calendar')
+            self.assertNotIn('retrospective_sensitivity.csv', meta['output_files'])
+            self.assertEqual(meta['daily_rows'], len(d2))
+            self.assertFalse(pd.read_csv(out/'daily_predictions.csv').baseline_mode.str.startswith('retrospective').any())
+
+    def test_industry_uses_identical_pairs_and_marks_zero_pair_days(self):
+        _, d, _ = b.calculate(self.panel(), events(), windows(events()), primary=set())
+        base = d.loc[d.window_type.eq('effective') & d.baseline_mode.eq('fixed_pre_event') &
+                     d.missing_policy.eq('exclude_missing') & d.model_id.eq('weekday_mean')].copy()
+        one = base.loc[base.date.eq('2025-08-02')].iloc[:1].copy()
+        ages = pd.concat([one.assign(age='10대', amount=10, prediction=20),
+                          one.assign(age='20대', amount=999, prediction=np.nan),
+                          one.assign(age='30대', amount=np.nan, prediction=999),
+                          one.assign(age='40대', amount=0, prediction=0)], ignore_index=True)
+        row = b.industry_daily(ages).iloc[0]
+        self.assertEqual(row.amount_paired, 10)
+        self.assertEqual(row.prediction_paired, 20)
+        self.assertEqual(row.paired_groups, 2)
+        self.assertEqual(row.total_groups, 4)
+        self.assertEqual(row.group_coverage, .5)
+        self.assertEqual(row.age, 'ALL')
+        self.assertEqual(row.aggregation_status, 'partial')
+        ages['prediction'] = np.nan
+        row = b.industry_daily(ages).iloc[0]
+        self.assertTrue(pd.isna(row.amount_paired))
+        self.assertTrue(pd.isna(row.prediction_paired))
+        self.assertEqual(row.paired_groups, 0)
+        self.assertEqual(row.aggregation_status, 'no_paired_groups')
+
+    def test_industry_does_not_mix_variants_or_double_count_all_rows(self):
+        _, d, _ = b.calculate(self.panel(), events(), windows(events()), primary=set(), retrospective=True)
+        a = b.industry_daily(d)
+        self.assertEqual(set(a.model_id), {'weekday_mean'})
+        self.assertEqual(set(a.baseline_mode), {'fixed_pre_event'})
+        self.assertEqual(set(a.missing_policy), {'exclude_missing'})
+        self.assertEqual(set(a.window_type), {'effective'})
+        self.assertEqual(set(a.total_groups), {1})
+        with self.assertRaises(ValueError): b.industry_daily(pd.concat([d, d.loc[d.age.eq('20대')].assign(age='ALL')]))
 
 
 if __name__ == '__main__':

@@ -246,11 +246,47 @@ def calculate(panel, events, windows, primary=PRIMARY, retrospective=False):
     return pd.DataFrame(summaries), daily, pd.DataFrame(validation)
 
 
+def industry_daily(daily):
+    """Sum actual and predicted sales over the exact same paired age groups."""
+    selected = daily.loc[daily.window_type.eq('effective') & daily.baseline_mode.eq('fixed_pre_event') &
+                         daily.missing_policy.eq('exclude_missing') & daily.model_id.eq('weekday_mean')].copy()
+    if selected.age.eq('ALL').any():
+        raise ValueError('industry aggregation requires age-detail rows only, not mixed ALL rows')
+    keys = ['event_id', 'window_start', 'window_end', 'window_type', 'baseline_mode',
+            'missing_policy', 'model_id', 'date', 'region', 'industry']
+    if selected.duplicated(keys + ['age']).any():
+        raise ValueError('duplicate age-detail rows for industry aggregation')
+    paired = selected.amount.notna() & selected.prediction.notna()
+    selected['amount_paired'] = selected.amount.where(paired)
+    selected['prediction_paired'] = selected.prediction.where(paired)
+    selected['paired'] = paired.astype(int)
+    selected['observed'] = selected.amount.notna().astype(int)
+    selected['predicted'] = selected.prediction.notna().astype(int)
+    result = selected.groupby(keys, as_index=False, dropna=False).agg(
+        amount_paired=('amount_paired', lambda x: x.sum(min_count=1)),
+        prediction_paired=('prediction_paired', lambda x: x.sum(min_count=1)),
+        paired_groups=('paired', 'sum'), total_groups=('age', 'nunique'),
+        observed_groups=('observed', 'sum'), predicted_groups=('predicted', 'sum'),
+        analysis_role=('analysis_role', 'first'), phase=('phase', 'first'))
+    result['age'] = 'ALL'
+    result['group_coverage'] = result.paired_groups / result.total_groups
+    result['complete_group_coverage'] = result.paired_groups.eq(result.total_groups)
+    result['aggregation_status'] = np.where(result.paired_groups.eq(0), 'no_paired_groups',
+                                            np.where(result.complete_group_coverage, 'complete', 'partial'))
+    return result
+
+
 def write_outputs(output, results, daily, validation, provenance):
     output.mkdir(parents=True, exist_ok=True)
+    retrospective_enabled = bool(results.baseline_mode.eq('retrospective_4week_sensitivity').any())
+    # Remove only the optional file owned by this script, preserving unrelated user files.
+    if not retrospective_enabled:
+        (output/'retrospective_sensitivity.csv').unlink(missing_ok=True)
     records = json.loads(results.to_json(orient='records', force_ascii=False))
     (output/'event_shortfall.json').write_text(json.dumps(records, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
     daily.to_csv(output/'daily_predictions.csv', index=False, encoding='utf-8-sig', na_rep='')
+    industry = industry_daily(daily)
+    industry.to_csv(output/'daily_industry.csv', index=False, encoding='utf-8-sig', na_rep='')
     validation.to_csv(output/'fixed_validation.csv', index=False, encoding='utf-8-sig', na_rep='')
     key = ['event_id', 'window_start', 'window_end', 'window_type', 'baseline_mode', 'missing_policy'] + KEY
     mean = results.loc[results.model_id.eq('weekday_mean')]
@@ -267,7 +303,7 @@ def write_outputs(output, results, daily, validation, provenance):
     # Compare sums on each policy's available dates; coverage is retained so these are not same-support effects.
     missing['net_shortfall_paired_difference'] = missing.net_shortfall_paired_zero-missing.net_shortfall_paired_exclude
     missing.to_csv(output/'missing_policy_sensitivity.csv', index=False, encoding='utf-8-sig', na_rep='')
-    if results.baseline_mode.eq('retrospective_4week_sensitivity').any():
+    if retrospective_enabled:
         mode_keys = ['event_id', 'window_start', 'window_end', 'window_type', 'model_id', 'missing_policy'] + KEY
         modes = results.loc[results.baseline_mode.eq('fixed_pre_event')].merge(
             results.loc[results.baseline_mode.eq('retrospective_4week_sensitivity')], on=mode_keys, suffixes=('_fixed', '_retrospective'), validate='one_to_one')
@@ -298,8 +334,16 @@ def write_outputs(output, results, daily, validation, provenance):
         - 회복일·지원 순위와 인과적 피해액은 계산하지 않습니다. 실제 결과는 허용된 팀 경로로 공유합니다.
         '''))
     (output/'baseline_report.md').write_text(''.join(lines), encoding='utf-8')
+    outputs = ['event_shortfall.json', 'daily_predictions.csv', 'daily_industry.csv', 'fixed_validation.csv',
+               'method_sensitivity.csv', 'missing_policy_sensitivity.csv', 'baseline_report.md', 'run_metadata.json']
+    if retrospective_enabled:
+        outputs.append('retrospective_sensitivity.csv')
     (output/'run_metadata.json').write_text(json.dumps({'calendar_provenance': provenance, 'daily_rows': len(daily),
-        'group_count': daily[KEY].drop_duplicates().shape[0], 'summary_rows': len(results)}, indent=2), encoding='utf-8')
+        'group_count': daily[KEY].drop_duplicates().shape[0], 'summary_rows': len(results),
+        'retrospective_enabled': retrospective_enabled, 'output_files': outputs,
+        'industry_rows': len(industry), 'industry_filter': {'window_type': 'effective', 'baseline_mode': 'fixed_pre_event',
+            'missing_policy': 'exclude_missing', 'model_id': 'weekday_mean'},
+        'industry_aggregation': 'same_paired_age_groups_only'}, indent=2), encoding='utf-8')
 
 
 def main():

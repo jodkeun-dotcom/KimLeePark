@@ -30,7 +30,7 @@ python -O -m unittest discover -s tests -p test_sales_baseline.py -v
 
 기본 창은 event와 observation 중 is_effective=True인 날짜입니다. observation은 다음 사건 시작 전날까지 절단됩니다. CSV의 analysis_role을 출력에 보존하고 excluded 사건은 계산하지 않습니다. case_study를 자동으로 statistical로 바꾸지 않습니다.
 
-2026-10-04 PR #24 커밋 dd31a176 기준 산출물을 독립 재생성해 확인했습니다. HEAT03은 8/17, HEAT04는 8/28, HEAT05는 9/12까지입니다. 세 사건 모두 현재 MIN_DAYS=7 기준 case_study이고 정식 통계비교 대상은 0건입니다. 기준 완화 여부는 팀 합의 사항입니다.
+2026-10-04 PR #24가 병합된 main(bf40bcb7)의 기상 계산 코드 기준입니다. 이전 독립 재생성에 사용한 dd31a176과 기상 계산 스크립트의 blob SHA가 같음을 확인했습니다. HEAT03은 8/17, HEAT04는 8/28, HEAT05는 9/12까지입니다. 세 사건 모두 현재 MIN_DAYS=7 기준 case_study이고 정식 통계비교 대상은 0건입니다. 기준 완화 여부는 팀 합의 사항입니다.
 
 절단 전 명목 창이 더 길면 nominal_overlap_sensitivity로 따로 출력합니다. 이 창에는 다음 사건이 섞일 수 있으며 회복 주 결과나 서로 합산할 부족액으로 쓰지 않습니다. CSV 사이의 사건 날짜 일치·중복·관찰기간 연속성을 검사합니다. 강한 폭염의 관찰 시작은 부모 사건 종료 뒤라는 #24 규칙을 유지합니다.
 
@@ -77,15 +77,30 @@ daily_predictions.csv를 로컬로 출력합니다. 같은 날짜라도 사건�
 
 회복 계산은 기본적으로 effective + fixed_pre_event + exclude_missing을 선택하고 model_id를 명시해야 합니다. 공휴일과 실제/예상 결측을 어떻게 회복 판단에서 다룰지는 세은과 공동 합의 전입니다. 서로 다른 사건·관찰기간을 섞지 않습니다.
 
+### 업종 전체 회복 곡선용 daily_industry.csv
+
+세은의 임시 기본 선택인 effective + fixed_pre_event + exclude_missing + weekday_mean만 별도로 집계합니다. 원래 연령별 CSV는 그대로 유지합니다. 사건·창·모델을 섞지 않고 날짜×지역×업종별로 실제·예상이 모두 있는 동일한 고객 연령 그룹만 양쪽에서 함께 합산합니다.
+
+- amount_paired / prediction_paired: 같은 paired 연령 그룹의 실제/예상 합계. 사용 가능한 그룹이 0이면 두 값 모두 빈칸이고 0으로 채우지 않습니다.
+- paired_groups / total_groups: 합계에 쓴 그룹 수 / 해당 업종의 전체 입력 연령 그룹 수. 그룹 수는 고객 수가 아닙니다.
+- observed_groups / predicted_groups: 실제/예상이 각각 있는 그룹 수. 합계의 표본은 paired_groups입니다.
+- group_coverage / complete_group_coverage: 연령 그룹 커버리지와 전체 그룹 사용 여부. partial 합계는 전체 업종의 완전한 매출이 아닙니다.
+- aggregation_status: complete / partial / no_paired_groups. age=ALL은 이 집계 표의 표기입니다. 연령 상세와 합산하면 중복됩니다.
+
+고유 키는 event_id + window_start + window_end + window_type + baseline_mode + missing_policy + model_id + date + region + industry입니다. 날짜마다 paired 그룹 구성이 달라질 수 있으므로 회복 곡선에서 구성 변화와 group_coverage도 함께 확인합니다. 이 출력 추가가 회복 기준의 공동 합의를 뜻하지는 않습니다.
+
 ## 출력과 해석
 
 - event_shortfall.json: 사건×그룹×모델×창×가정별 요약.
 - daily_predictions.csv: 회복 곡선·일수 계산에 연결할 일별 예상값.
+- daily_industry.csv: 기본 필터의 동일 paired 연령 그룹만 합산한 업종별 일별 표와 그룹 커버리지.
 - fixed_validation.csv: 제한된 사전 검증의 오차와 평가 가능한 범위.
 - method_sensitivity.csv: 평균/중앙값 비교와 비공휴일 순부족률 차이.
 - retrospective_sensitivity.csv: 선택형 사후 기준선을 켠 경우에만 사전/사후 기준의 차이와 각각의 계산 가능 범위.
 - missing_policy_sensitivity.csv: 빈 행 제외/0가정 비교와 각 커버리지.
 - baseline_report.md / run_metadata.json: 동적으로 계산한 현황·출처·한계.
+
+같은 출력 폴더에 사후 비교를 켠 뒤 꺼서 재실행하면, 이 스크립트가 관리하는 retrospective_sensitivity.csv만 삭제합니다. 다른 사용자 파일은 보존합니다. 메타정보에 retrospective_enabled와 현재 실행의 output_files를 기록해 과거 파일과 혼동하지 않도록 합니다.
 
 부족분 합계는 max(예상−실제,0)의 합이고 순누적 부족은 초과 매출까지 차감한 합입니다. 음수를 허용합니다. 고객 연령 비교이며 사업주 연령·1인당 소비나 춘천 전체 손실액으로 확대하지 않습니다. 보고서는 들여쓰기 없는 Markdown이며 입력 규모나 특정 모델 선택을 고정 결론으로 쓰지 않습니다.
 
@@ -97,6 +112,8 @@ daily_predictions.csv를 로컬로 출력합니다. 같은 날짜라도 사건�
 
 2026-10-04 수정본 검증: 가상자료 unittest 12개가 일반 실행과 python -O에서 모두 통과했습니다. PR #24 산출물을 재생성해 실제 카드자료로 기본·0가정·선택형 사후 민감도를 실행했습니다. 일별 키 중복 없음, 사전 모델 학습 종료일<고정일, 공휴일 예측 결측, 빈 행 정책 표시, 사례분류와 HEAT03 절단일을 확인했습니다. 이전 결과와 기간·가정이 동일한 네 창은 기존 계산값과 일치했습니다. 변경된 HEAT03 유효 창은 이전 8/18 창과 별도 결과입니다.
 
-.gitignore는 #25의 data/README.md와 data/manifest.json allowlist를 유지합니다. 원본·정제 데이터와 수치 결과는 커밋하지 않습니다. 실제 분석 결과는 허용된 팀 경로로 공유하고 PR에는 코드·문서·가상자료 테스트만 올립니다.
+.gitignore는 병합된 main 것을 그대로 유지하며 이 PR의 별도 변경에서 제외합니다. README/manifest와 공개 기상 2개 파일 예외, 데이터 확장자·outputs 제외 규칙을 보존합니다. 원본·정제 데이터와 수치 결과는 커밋하지 않습니다. 실제 분석 결과는 허용된 팀 경로로 공유하고 PR에는 코드·문서·가상자료 테스트만 올립니다.
+
+추가 재리뷰 대응: 옵션 켜기→끄기 실행의 이전 파일 제거·사용자 파일 보존·메타정보 일치, 업종 집계의 비대칭 결측·관측 0·paired 0건·기본 필터 분리 검사를 추가했습니다. 총 15개 검사가 일반 실행과 python -O에서 통과합니다. 이전 사건의 유효 회복일을 사전 학습에서 제외하는 별도 변형은 선택 제안이며 아직 추가하지 않았습니다. 현재 기준과의 차이 및 학습 부족 처리를 팀과 먼저 합의할 사항으로 남깁니다.
 
 남은 일: 빈 행 의미에 대한 제공기관 확인, 전체 공휴일 달력, 학습일·중첩 창·모델·회복 기준 공동 합의, 세은의 회복 코드에서 CSV 수신·재실행, 조은의 동일 평가조건·결합 형식 연결. #9는 완료로 닫지 않습니다. 기존 노션 결과표는 이전 계산 버전이며 이번 수정 후 산출물로 검토·교체하기 전 최신 결과로 쓰지 않습니다.
