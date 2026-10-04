@@ -14,10 +14,35 @@
 
 원본은 변경하지 않는다. 폴더명 `wether`는 현재 경로 그대로 둔다.
 
+## 원본 데이터 받는 방법
+
+기상청 공개자료라 원본과 정제본을 저장소에 포함한다. 카드·SKT 등 대회 제공 자료는 계속 저장소에서 제외한다(`.gitignore`는 아래 두 파일만 예외로 둔다).
+
+| 파일 | 내용 |
+|---|---|
+| `data/raw/wether/OBS_ASOS_DD_20261001161226.csv` | 포털에서 받은 원본 (CP949) |
+| `data/processed/weather.csv` | `prepare_weather.py` 출력 (원본에서 바이트 단위로 동일하게 재생성됨) |
+
+**1) 저장소 파일 사용 (기본):** `git clone` 또는 `git pull` 후 바로 [실행](#실행)의 명령을 돌리면 된다.
+
+**2) 포털에서 직접 받기 (재검증·기간 변경 시):**
+
+1. [기상자료개방포털](https://data.kma.go.kr) 접속 (다운로드 시 로그인 필요할 수 있음)
+2. **지상 → 종관기상관측(ASOS) → 일자료**
+3. 지점: **춘천(101)**, 기간: **2025-07-01 ~ 2025-12-31**
+4. 자료 항목: **전체 선택**
+5. 조회 후 **CSV 다운로드**
+6. 받은 파일을 `data/raw/wether/`에 저장. 파일명(`OBS_ASOS_DD_<다운로드시각>.csv`)이 다르면 아래 명령의 `--input`을 실제 파일명으로 바꾼다.
+
+열 구성이 달라지면(항목 일부만 선택 등) `prepare_weather.py`가 `Unexpected ASOS columns` 오류로 중단한다.
+
 ## 실행
+
+저장소 루트에서 순서대로 실행한다. README의 명령과 같다.
 
 ```bash
 python scripts/prepare_weather.py --input data/raw/wether/OBS_ASOS_DD_20261001161226.csv --output data/processed/weather.csv
+python scripts/label_weather_events.py   # 입력 data/processed/weather.csv → data/processed/weather_events/, outputs/
 ```
 
 출력은 쉼표 구분 UTF-8 BOM CSV. 확인용 노트북: [notebook/data_read.ipynb](../notebook/data_read.ipynb)
