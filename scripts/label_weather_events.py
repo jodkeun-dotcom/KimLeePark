@@ -12,6 +12,7 @@ import pandas as pd
 PERIOD = ('2025-07-01', '2025-12-31')
 SUMMER_MONTHS = range(5, 10)        # 기상청 여름철 체감온도 적용 기간: 5~9월
 BASELINE_DAYS, OBSERVATION_DAYS = 7, 14
+MIN_DAYS = 7                        # 유효 베이스라인·관찰일수가 이보다 적으면 statistical → case_study (팀 조정 가능)
 MAX_GAP_DAYS = 2                    # 같은 유형 사건 사이 비사건일이 2일 이내면 하나의 사건으로 병합
 CASE_STUDY_TYPES = {'호우'}          # 사건 수가 적어 정식 통계비교 대신 사례연구로 다루는 유형
 NO_DATA_TYPES = {'폭설'}             # 원자료에 값이 없어 판정 불가한 유형
@@ -115,7 +116,7 @@ def group_events(df):
     events['observation_in_period'] = events.observation_end.le(end)
     events['baseline_event_days'] = [event_days(a, b) for a, b in zip(events.baseline_start, events.baseline_end)]
     events['observation_event_days'] = [event_days(a, b) for a, b in zip(events.observation_start, events.observation_end)]
-    events = assign_roles(events)
+    events = assign_roles(add_effective_windows(events))
 
     # 판정 불가 유형은 사건이 없어도 결과 파일에 '데이터 없음' 행으로 남긴다.
     for flag, prefix, label, _ in EVENT_TYPES:
@@ -123,7 +124,8 @@ def group_events(df):
             events.loc[len(events), ['event_id', 'type', 'analysis_role', 'exclude_reason']] = [
                 f'{prefix}_NA', label, 'excluded', '데이터 없음: 적설 열이 전 기간 결측이라 판정 불가']
     # 빈 행 추가로 실수형이 된 정수·불리언 열 복원
-    ints = ['duration_days', 'event_days', 'baseline_event_days', 'observation_event_days', 'severe_event_days']
+    ints = ['duration_days', 'event_days', 'baseline_event_days', 'observation_event_days', 'severe_event_days',
+            'baseline_days_effective', 'observation_days_effective']
     events[ints] = events[ints].astype('Int64')
     events[['baseline_in_period', 'observation_in_period']] = events[['baseline_in_period', 'observation_in_period']].astype('boolean')
     return events
@@ -137,7 +139,12 @@ def link_nested(events, df):
         parents = events[events.type == parent]
         for i, ev in events[events.type == child].iterrows():
             hit = parents[(parents.start_date <= ev.start_date) & (parents.end_date >= ev.end_date)]
-            events.loc[i, 'parent_event_id'] = hit.event_id.iloc[0] if len(hit) else None
+            if hit.empty:
+                continue
+            # 회복은 부모 사건이 끝난 뒤부터 관찰한다 (부모 사건이 진행 중인 날을 관찰 +1일로 잡지 않음)
+            events.loc[i, 'parent_event_id'] = hit.event_id.iloc[0]
+            events.loc[i, 'observation_start'] = hit.end_date.iloc[0] + pd.Timedelta(days=1)
+            events.loc[i, 'observation_end'] = hit.end_date.iloc[0] + pd.Timedelta(days=OBSERVATION_DAYS)
     severe = df.set_index('date').is_severe_heatwave
     heat = events.type == '폭염'
     events['severe_event_days'] = pd.NA
@@ -146,44 +153,117 @@ def link_nested(events, df):
     return events
 
 
-def assign_roles(events):
-    """analysis_role: statistical(정식 통계비교) / case_study(사례연구 후보) / excluded(제외)."""
+def md(d):
+    return f'{d.month}/{d.day}'
+
+
+WINDOW_COLUMNS = ['window', 'date', 'day_offset', 'is_effective', 'overlap_event_id', 'ineffective_reason']
+
+
+def window_days(events, ev):
+    """사건 하나의 베이스라인·사건·관찰기간 날짜별 유효 여부.
+
+    events 안의 다른 사건 기간(시작~종료, 유형 무관)과 겹치는 날은 쓰지 않는다.
+    - 베이스라인(시작일 전 BASELINE_DAYS일): 겹치는 날과 분석 기간 밖의 날만 빼고 나머지를 쓴다.
+    - 관찰기간(종료일 다음 날부터 OBSERVATION_DAYS일): 처음 겹치는 날(새 사건 발생)에서 절단하고 그 뒤는 모두 쓰지 않는다.
+    """
+    start, end = map(pd.Timestamp, PERIOD)
+    others = events[(events.event_id != ev.event_id) & events.start_date.notna()]
+
+    def overlap(d):
+        return ','.join(others.event_id[(others.start_date <= d) & (others.end_date >= d)])
+    rows = []
+    for d in pd.date_range(ev.baseline_start, ev.baseline_end):
+        hit = overlap(d)
+        reason = '분석 기간 밖' if not start <= d <= end else f'다른 사건 기간({hit})' if hit else ''
+        rows.append(('baseline', d, (d - ev.start_date).days, not reason, hit, reason))
+    for d in pd.date_range(ev.start_date, ev.end_date):
+        rows.append(('event', d, (d - ev.start_date).days, True, '', ''))
+    cut = ''
+    for d in pd.date_range(ev.observation_start, ev.observation_end):
+        hit = overlap(d)
+        if hit and not cut:
+            cut = f'{hit}({md(d)})'
+        reason = (f'관찰 절단: {cut}에서 새 사건' if cut else '분석 기간 밖' if d > end else '')
+        # 관찰 day_offset은 회복 시작 기준(+1 = observation_start). 강한 폭염은 부모 사건 종료 다음 날이 +1
+        rows.append(('observation', d, (d - ev.observation_start).days + 1, not reason, hit, reason))
+    return pd.DataFrame(rows, columns=WINDOW_COLUMNS)
+
+
+def add_effective_windows(events):
+    """유효 베이스라인 일수, 절단된 관찰기간과 그 사유 열을 추가한다."""
     events = events.copy()
-    events['analysis_role'] = 'statistical'
-    events['exclude_reason'] = ''
-    case = events.type.isin(CASE_STUDY_TYPES)
-    events.loc[case, 'analysis_role'] = 'case_study'
-    events.loc[case, 'exclude_reason'] = '사례연구 후보: 사건 수가 적어 정식 통계비교 제외'
-    nested = events.parent_event_id.notna()
-    events.loc[nested, 'analysis_role'] = 'case_study'
-    events.loc[nested, 'exclude_reason'] = [
-        f'일반 폭염 사건 {p} 내부의 강도 특성: 독립 회복 사건으로 비교하지 않음 ({p}.severe_event_days에 반영)'
-        for p in events.parent_event_id[nested]]
-    # 베이스라인이 카드 자료 시작일 이전에 걸리면 비교 기준이 없으므로 자동 제외(사례연구보다 우선)
-    out = ~events.baseline_in_period.astype(bool)
-    events.loc[out, 'analysis_role'] = 'excluded'
-    events.loc[out, 'exclude_reason'] = [
-        f'베이스라인 {b:%Y-%m-%d}~{e:%Y-%m-%d}이 카드 자료 시작일({PERIOD[0]}) 이전에 걸림'
-        for b, e in zip(events.baseline_start[out], events.baseline_end[out])]
+    info = []
+    for ev in events.itertuples():
+        w = window_days(events, ev)
+        base, obs = w[w.window == 'baseline'], w[w.window == 'observation']
+        used = obs[obs.is_effective]
+        dropped = base[base.overlap_event_id != '']
+        cut = obs[obs.overlap_event_id != ''].head(1)
+        info.append({
+            'baseline_days_effective': int(base.is_effective.sum()),
+            'baseline_overlap': ', '.join(
+                f'{i} {md(g.date.min())}' + (f'~{md(g.date.max())}' if len(g) > 1 else '')
+                for i, g in dropped.groupby('overlap_event_id', sort=False)),
+            'observation_end_effective': used.date.max() if len(used) else pd.NaT,
+            'observation_days_effective': len(used),
+            'observation_cut_by': ''.join(f'{i}({md(d)})' for i, d in zip(cut.overlap_event_id, cut.date)),
+        })
+    columns = ['baseline_days_effective', 'baseline_overlap', 'observation_end_effective',
+               'observation_days_effective', 'observation_cut_by']
+    return pd.concat([events, pd.DataFrame(info, index=events.index, columns=columns)], axis=1)
+
+
+def assign_roles(events):
+    """analysis_role: statistical(정식 통계비교) / case_study(사례연구 후보) / excluded(제외).
+
+    case_study 사유가 여럿이면 exclude_reason에 '; '로 모두 적는다.
+    베이스라인이 분석 기간 밖에 걸리는 excluded가 가장 우선한다.
+    """
+    events = events.copy()
+    roles, reasons = [], []
+    for ev in events.itertuples():
+        why = []
+        if ev.type in CASE_STUDY_TYPES:
+            why.append('사례연구 후보: 사건 수가 적어 정식 통계비교 제외')
+        if pd.notna(ev.parent_event_id):
+            p = ev.parent_event_id
+            why.append(f'일반 폭염 사건 {p} 내부의 강도 특성: 독립 회복 사건으로 비교하지 않음 ({p}.severe_event_days에 반영)')
+        if ev.baseline_days_effective < MIN_DAYS:
+            why.append(f'유효 베이스라인 {ev.baseline_days_effective}일 < {MIN_DAYS}일 (다른 사건 기간 {ev.baseline_overlap} 제외)')
+        if ev.observation_days_effective < MIN_DAYS:
+            where = ev.observation_cut_by or '분석 기간 끝'
+            why.append(f'관찰기간이 {where}에서 절단되어 {ev.observation_days_effective}일 < {MIN_DAYS}일')
+        role = 'case_study' if why else 'statistical'
+        # 베이스라인이 카드 자료 시작일 이전에 걸리면 비교 기준이 없으므로 자동 제외(사례연구보다 우선)
+        if not ev.baseline_in_period:
+            role = 'excluded'
+            why = [f'베이스라인 {ev.baseline_start:%Y-%m-%d}~{ev.baseline_end:%Y-%m-%d}이 카드 자료 시작일({PERIOD[0]}) 이전에 걸림']
+        roles.append(role)
+        reasons.append('; '.join(why))
+    events['analysis_role'] = pd.Series(roles, index=events.index, dtype=object)
+    events['exclude_reason'] = pd.Series(reasons, index=events.index, dtype=object)
     return events
 
 
 def event_windows(events):
-    """사건별 날짜 매핑(긴 형식): 카드 일별 자료와 date로 결합해 기간별 비교에 쓴다."""
+    """사건별 날짜 매핑(긴 형식): 카드 일별 자료와 date로 결합해 기간별 비교에 쓴다.
+
+    명목 기간(베이스라인 7일·관찰 14일)의 모든 날짜를 남기고, 비교에 쓰는 날은 is_effective로 표시한다.
+    겹침은 넘겨받은 events 안의 다른 사건 기준으로 판정한다.
+    """
     parts = []
     for ev in events.dropna(subset=['start_date']).itertuples():   # 날짜 없는 '데이터 없음' 행 제외
-        for window, a, b in [('baseline', ev.baseline_start, ev.baseline_end),
-                             ('event', ev.start_date, ev.end_date),
-                             ('observation', ev.observation_start, ev.observation_end)]:
-            dates = pd.date_range(a, b)
-            parts.append(pd.DataFrame({'event_id': ev.event_id, 'type': ev.type, 'analysis_role': ev.analysis_role,
-                                       'window': window, 'date': dates,
-                                       'day_offset': (dates - (ev.start_date if window != 'observation' else ev.end_date)).days}))
+        w = window_days(events, ev)
+        w.insert(0, 'event_id', ev.event_id)
+        w.insert(1, 'type', ev.type)
+        w.insert(2, 'analysis_role', ev.analysis_role)
+        parts.append(w)
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(
-        columns=['event_id', 'type', 'analysis_role', 'window', 'date', 'day_offset'])
+        columns=['event_id', 'type', 'analysis_role'] + WINDOW_COLUMNS)
 
 
-def plot_timeline(df, events, path):
+def plot_timeline(df, events, windows, path):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -195,7 +275,7 @@ def plot_timeline(df, events, path):
     plt.rcParams.update({'font.family': korean[:1] or ['DejaVu Sans'], 'axes.unicode_minus': False})
     ink, muted, grid = '#1f1f1e', '#6b6a64', '#e4e3dc'
     colors = {'폭염': '#2a78d6', '강한 폭염': '#eb6834', '호우': '#1baf7a', '폭설': '#eda100'}  # 범주형 고정 순서
-    fig, axes = plt.subplots(3, 1, figsize=(12, 7.5), sharex=True, gridspec_kw={'height_ratios': [2, 2, 1.6]})
+    fig, axes = plt.subplots(3, 1, figsize=(12, 8.5), sharex=True, gridspec_kw={'height_ratios': [2, 2, 2.6]})
     ax_t, ax_p, ax_e = axes
     for ax in axes:
         ax.spines[['top', 'right']].set_visible(False)
@@ -218,20 +298,32 @@ def plot_timeline(df, events, path):
     lanes = [label for _, _, label, _ in EVENT_TYPES]
     dated = events.dropna(subset=['start_date'])
     for i, label in enumerate(lanes):
-        for ev in dated[dated.type == label].itertuples():
+        last, raised = None, False
+        for ev in dated[dated.type == label].sort_values('start_date').itertuples():
             # 정식 비교 대상은 진한 막대, 제외·사례연구는 옅은 빗금 막대
             main = ev.analysis_role == 'statistical'
-            ax_e.barh(i, ev.duration_days, left=ev.start_date - pd.Timedelta(hours=12), height=0.6,
+            ax_e.barh(i, ev.duration_days, left=ev.start_date - pd.Timedelta(hours=12), height=0.4,
                       color=colors[label], alpha=1 if main else 0.35, hatch=None if main else '///',
                       edgecolor='white', linewidth=2)
             # 사건 시작일에 맞춰 막대 위에 왼쪽 정렬 (가까운 사건끼리 겹치지 않도록)
-            ax_e.text(ev.start_date - pd.Timedelta(hours=12), i - 0.36, ev.event_id,
+            # 앞 라벨과 8일 이내로 붙으면 한 단 위로 올려 겹치지 않게 한다
+            raised = last is not None and (ev.start_date - last).days < 8 and not raised
+            last = ev.start_date
+            ax_e.text(ev.start_date - pd.Timedelta(hours=12), i - 0.24 - 0.16 * raised, ev.event_id,
                       ha='left', va='bottom', fontsize=6.5, color=muted)
+    # 사건 막대 아래 두 줄: 베이스라인(위)·관찰기간(아래). 유형 색 실선 = 비교에 쓰는 날, 회색 점선 = 겹침 제외·절단된 날
+    half = pd.Timedelta(hours=12)
+    for row in windows[windows.window != 'event'].itertuples():
+        y = lanes.index(row.type) + (0.3 if row.window == 'baseline' else 0.42)
+        ax_e.hlines(y, row.date - half, row.date + half, color=colors[row.type] if row.is_effective else muted,
+                    linewidth=2 if row.is_effective else 1, linestyles='solid' if row.is_effective else (0, (1, 1.5)))
     ax_e.text(df.date.min(), lanes.index('폭설'), '  적설 자료 없음(판정 불가·분석 제외)', va='center', fontsize=8, color=muted)
-    ax_e.text(df.date.max(), len(lanes) - 0.55, '진한 막대: 정식 비교 대상 / 옅은 빗금: 제외·사례연구',
+    ax_e.text(df.date.max(), len(lanes) - 0.4,
+              f'막대: 사건 (진한 막대 = 정식 비교, 옅은 빗금 = 제외·사례연구)   막대 아래 두 줄: 베이스라인 / 관찰기간\n'
+              f'실선 = 비교에 쓰는 날, 회색 점선 = 다른 사건과 겹쳐 제외되거나 절단된 날 (MIN_DAYS={MIN_DAYS})',
               ha='right', va='bottom', fontsize=8, color=muted)
     ax_e.set_yticks(range(len(lanes)), [f'{l} ({(dated.type == l).sum()}건)' for l in lanes], fontsize=9, color=ink)
-    ax_e.set_ylim(len(lanes) - 0.4, -0.6)
+    ax_e.set_ylim(len(lanes) + 0.2, -0.5)
     ax_e.grid(axis='y', visible=False)
     ax_e.grid(axis='x', color=grid, linewidth=0.8)
     ax_e.xaxis.set_major_locator(mdates.MonthLocator())
@@ -268,7 +360,7 @@ def run(source, output, figure):
     windows.to_csv(output / 'weather_event_windows.csv', index=False, encoding='utf-8-sig')
     counts.to_csv(output / 'weather_event_counts.csv', index=False, encoding='utf-8-sig')
     by_date.to_csv(output / 'weather_missing_by_date.csv', index=False, encoding='utf-8-sig')
-    plot_timeline(df, events, figure)
+    plot_timeline(df, events, windows, figure)
 
     print('필수 열 점검\n', columns.to_string(index=False))
     print('\n이벤트 건수\n', counts.to_string(index=False))

@@ -130,45 +130,92 @@ Tw(습구온도) = Ta·atan[0.151977(RH+8.313659)^½] + atan(Ta+RH) − atan(RH�
 - 같은 유형 사건일 사이의 비사건일이 **2일 이내**면 하나의 사건으로 병합한다(예: 7/23, 7/26 → 사건 7/23~7/26). 3일 이상 끊기면 별도 사건이다. 병합 후 event_id를 유형별 시간순으로 다시 매긴다.
 - `duration_days`는 병합된 사이 날짜를 포함한 기간, `event_days`는 실제 기준을 넘은 날 수다.
 - 강한 폭염은 폭염의 부분집합이므로 두 목록에 모두 나타난다. 강한 폭염 사건은 `parent_event_id`에 자신을 포함하는 폭염 사건을, 폭염 사건은 `severe_event_days`에 강한 폭염 일수를 기록한다. 강도 정보는 부모 폭염 사건의 속성으로 분석한다.
-- 베이스라인: 시작일 전 7일(−7 ~ −1일). 관찰기간: 종료일 후 14일(+1 ~ +14일).
-- `analysis_role`과 `exclude_reason`:
+#### 베이스라인·관찰기간과 사건 겹침
+
+다른 사건이 섞인 날을 평상시나 회복기로 쓰지 않도록 아래 기준을 적용한다. "다른 사건 기간"은 유형에 관계없이 다른 사건의 시작일~종료일(병합된 사이 날짜 포함)이다.
+
+| 구간 | 명목 기간 | 유효 기간 | 열 |
+|---|---|---|---|
+| 베이스라인 | 시작일 전 7일 (−7 ~ −1일) | 다른 사건 기간과 분석 기간(7/1) 이전 날짜를 **빼고** 남은 날 | `baseline_days_effective`, `baseline_overlap` |
+| 관찰기간(회복 측정) | 종료일 다음 날부터 14일 (+1 ~ +14일) | 다른 사건 기간과 처음 만나는 날(새 사건 발생)의 **전날까지로 절단** | `observation_end_effective`, `observation_days_effective`, `observation_cut_by` |
+
+- 강한 폭염의 회복은 **부모 폭염 사건 종료 다음 날**부터 관찰한다. 예: SHEAT01(7/8)은 HEAT02(7/7~7/9)가 끝난 7/10이 관찰 +1일이며, 폭염이 이어지는 7/9는 관찰기간이 아니다.
+- 유효 베이스라인 또는 유효 관찰일수가 **`MIN_DAYS`(기본 7일)** 보다 적으면 `case_study`로 내리고 `exclude_reason`에 사유를 적는다(예: `관찰기간이 HEAT05(8/29)에서 절단되어 3일 < 7일`). `MIN_DAYS`는 `scripts/label_weather_events.py` 상단 상수이며 팀 합의에 따라 조정한다.
+- 베이스라인 7일과 `MIN_DAYS` 7일이 같으므로, 현재 기준에서는 베이스라인에 다른 사건 기간이 하루라도 있으면 정식 비교에서 빠진다.
+
+#### analysis_role과 exclude_reason
 
 | analysis_role | 조건 | exclude_reason |
 |---|---|---|
-| statistical | 정식 통계비교 대상 | (빈칸) |
-| excluded | 베이스라인이 2025-07-01 이전에 걸림(자동 제외, 우선 적용) | 베이스라인 날짜 범위 기재 |
+| statistical | 정식 통계비교 대상 (아래 조건에 하나도 해당하지 않음) | (빈칸) |
+| excluded | 베이스라인이 2025-07-01 이전에 걸림(자동 제외, 가장 우선) | 베이스라인 날짜 범위 기재 |
 | case_study | 호우: 사건 1건이라 정식 통계비교 제외 | 사례연구 후보 |
 | case_study | 강한 폭염: 항상 일반 폭염 사건 안에 있어 독립 회복 사건으로 비교하지 않음 | 부모 폭염 사건 ID 기재 |
+| case_study | 유효 베이스라인 또는 유효 관찰일수 < `MIN_DAYS` | 남은 일수와 겹친 사건·절단 지점 기재 |
 | excluded | 폭설: 적설 데이터 없음 (`SNOW_NA` 행, 날짜 빈칸) | 데이터 없음 |
 
-- `baseline_event_days`, `observation_event_days`: 해당 기간 안의 폭염·호우·폭설일 수. 겹침은 표시만 하고 제외하지 않는다.
-- `weather_event_windows.csv`에도 `analysis_role`이 있으므로 정식 비교는 `analysis_role == 'statistical'`로 거른다.
+- 사유가 여럿이면 `exclude_reason`에 `; `로 모두 적는다.
+- `baseline_event_days`, `observation_event_days`: 명목 기간 안의 폭염·호우·폭설 판정일 수(참고용).
+- 정식 비교는 `weather_events.csv`에서 `analysis_role == 'statistical'`인 사건을 고르고, `weather_event_windows.csv`에서 `is_effective == True`인 날짜만 쓴다.
 
 ### 출력
 
 | 파일 | 내용 |
 |---|---|
 | `data/processed/weather_events/weather_daily_events.csv` | 일별 정제자료 + 체감온도 + flag 열 |
-| `data/processed/weather_events/weather_events.csv` | 사건 목록: event_id, type, 시작·종료일, 지속일수, peak_value, 베이스라인·관찰기간 |
-| `data/processed/weather_events/weather_event_windows.csv` | 사건 × 날짜 매핑(window = baseline/event/observation, day_offset). 카드 일별 자료와 date로 결합 |
-| `data/processed/weather_events/weather_event_counts.csv` | 유형별 사건 수·일수, 판정 가능 여부 |
+| `data/processed/weather_events/weather_events.csv` | 사건 목록 (아래 열 설명) |
+| `data/processed/weather_events/weather_event_windows.csv` | 사건 × 날짜 매핑. 카드 일별 자료와 date로 결합 (아래 열 설명) |
+| `data/processed/weather_events/weather_event_counts.csv` | 유형별 사건 수·일수, 역할별 건수, 판정 가능 여부 |
 | `data/processed/weather_events/weather_missing_by_date.csv` | 날짜별 결측 열 목록 |
-| `outputs/weather_event_timeline.png` | 체감온도·강수·이벤트 타임라인 |
+| `outputs/weather_event_timeline.png` | 체감온도·강수·이벤트 타임라인. 사건 막대 아래에 베이스라인·관찰기간을 실선(유효)과 회색 점선(제외·절단)으로 표시 |
 
-### 결과 (2025-07~12)
+`data/processed/weather_events/`와 `outputs/`는 스크립트로 재생성하므로 저장소에 포함하지 않는다.
 
-| event_id | 유형 | 기간 | 기준 초과일 | 최고값 | analysis_role |
-|---|---|---|---|---|---|
-| HEAT01 | 폭염 | 7/1 | 1 | 33.4℃ | excluded (베이스라인 6월) |
-| HEAT02 | 폭염 | 7/7~7/9 | 3 | 35.8℃ | excluded (베이스라인 6/30 포함) |
-| HEAT03 | 폭염 | 7/23~8/4 | 10 | 35.5℃ | statistical |
-| HEAT04 | 폭염 | 8/18~8/25 | 6 | 34.1℃ | statistical |
-| HEAT05 | 폭염 | 8/29 | 1 | 33.4℃ | statistical |
-| SHEAT01 | 강한 폭염 | 7/8 | 1 | 35.8℃ | case_study (HEAT02 내부 강도 특성) |
-| SHEAT02 | 강한 폭염 | 7/28 | 1 | 35.5℃ | case_study (HEAT03 내부 강도 특성) |
-| RAIN01 | 호우 | 7/20 | 1 | 94.7mm | case_study |
-| SNOW_NA | 폭설 | - | - | - | excluded (데이터 없음) |
+`weather_events.csv` 열:
 
-- 정식 통계비교 대상: 폭염 3건(HEAT03~05).
+| 열 | 내용 |
+|---|---|
+| event_id, type | 사건 ID, 유형 |
+| start_date, end_date, duration_days, event_days | 시작·종료일, 병합 사이 날짜 포함 기간, 기준 초과일 수 |
+| peak_value, peak_variable | 사건 중 최고값과 그 변수 |
+| baseline_start, baseline_end | 명목 베이스라인 (시작일 −7 ~ −1일) |
+| observation_start, observation_end | 명목 관찰기간 (+1 ~ +14일). 강한 폭염은 부모 사건 종료일 기준 |
+| baseline_in_period, observation_in_period | 명목 기간이 분석 기간(2025-07-01~12-31) 안에 있는지 |
+| baseline_event_days, observation_event_days | 명목 기간 안의 사건 판정일 수 (참고용) |
+| parent_event_id | 강한 폭염을 포함하는 폭염 사건 ID |
+| severe_event_days | 폭염 사건 안의 강한 폭염 일수 (강도 속성) |
+| baseline_days_effective | 다른 사건 기간·분석 기간 밖을 뺀 베이스라인 일수 |
+| baseline_overlap | 베이스라인에서 뺀 다른 사건과 날짜 (예: `RAIN01 7/20`) |
+| observation_end_effective, observation_days_effective | 절단 후 관찰기간 종료일과 일수 |
+| observation_cut_by | 관찰기간을 절단한 사건과 날짜 (예: `HEAT05(8/29)`) |
+| analysis_role, exclude_reason | 위 표 참고 |
+
+`weather_event_windows.csv` 열:
+
+| 열 | 내용 |
+|---|---|
+| event_id, type, analysis_role | 사건 정보 |
+| window | baseline / event / observation |
+| date | 날짜. 명목 기간의 모든 날짜를 남긴다 |
+| day_offset | baseline·event는 시작일 기준(−7 ~ −1, 0 ~), observation은 회복 시작 기준(+1 = observation_start) |
+| is_effective | 비교에 쓰는 날이면 True. 겹침으로 제외되거나 절단 이후인 날은 False |
+| overlap_event_id | 그 날짜와 겹치는 다른 사건 ID |
+| ineffective_reason | False인 이유 (`다른 사건 기간(RAIN01)`, `관찰 절단: HEAT05(8/29)에서 새 사건`, `분석 기간 밖`) |
+
+### 결과 (2025-07~12, MIN_DAYS = 7)
+
+| event_id | 유형 | 기간 | 기준 초과일 | 최고값 | 유효 베이스라인 | 유효 관찰기간 | analysis_role |
+|---|---|---|---|---|---|---|---|
+| HEAT01 | 폭염 | 7/1 | 1 | 33.4℃ | 0일 (6월) | 7/2~7/6, 5일 (HEAT02에서 절단) | excluded (베이스라인 6월) |
+| HEAT02 | 폭염 | 7/7~7/9 | 3 | 35.8℃ | 5일 (6/30 기간 밖, HEAT01 7/1 제외) | 7/10~7/19, 10일 (RAIN01에서 절단) | excluded (베이스라인 6/30 포함) |
+| HEAT03 | 폭염 | 7/23~8/4 | 10 | 35.5℃ | 6일 (RAIN01 7/20 제외) | 8/5~8/17, 13일 (HEAT04에서 절단) | case_study (베이스라인 6일) |
+| HEAT04 | 폭염 | 8/18~8/25 | 6 | 34.1℃ | 7일 | 8/26~8/28, 3일 (HEAT05에서 절단) | case_study (관찰 3일) |
+| HEAT05 | 폭염 | 8/29 | 1 | 33.4℃ | 3일 (HEAT04 8/22~8/25 제외) | 8/30~9/12, 14일 | case_study (베이스라인 3일) |
+| SHEAT01 | 강한 폭염 | 7/8 | 1 | 35.8℃ | 5일 | 7/10~7/19, 10일 (HEAT02 종료 후, RAIN01에서 절단) | case_study (HEAT02 내부 강도 특성) |
+| SHEAT02 | 강한 폭염 | 7/28 | 1 | 35.5℃ | 2일 | 8/5~8/17, 13일 (HEAT03 종료 후, HEAT04에서 절단) | case_study (HEAT03 내부 강도 특성) |
+| RAIN01 | 호우 | 7/20 | 1 | 94.7mm | 7일 | 7/21~7/22, 2일 (HEAT03에서 절단) | case_study (사례연구 후보, 관찰 2일) |
+| SNOW_NA | 폭설 | - | - | - | - | - | excluded (데이터 없음) |
+
+- **현재 기준(MIN_DAYS = 7)에서 정식 통계비교 대상은 0건이다.** 7~8월 폭염·호우가 2~3주 간격으로 이어져 깨끗한 베이스라인 7일과 관찰 7일을 함께 확보한 사건이 없다.
+- `MIN_DAYS`를 낮추면: 6일 이하 → HEAT03 1건, 3일 이하 → HEAT03~05 3건이 정식 비교 대상이 된다. 기준값은 팀 합의가 필요하다.
 - 강한 폭염 2건은 각각 1일이며 폭염 HEAT02·HEAT03 안에 있다. 독립 회복 사건으로 비교하지 않고 사례연구로 두며, 강도는 부모 사건의 `severe_event_days`(HEAT02 1일, HEAT03 1일)로 반영한다.
-- HEAT03의 베이스라인(7/16~7/22)에는 호우일(7/20)이 포함된다.

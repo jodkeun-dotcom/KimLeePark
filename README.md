@@ -10,7 +10,7 @@
 scripts/prepare_weather.py       # 춘천 ASOS 일별 기상 (CP949 → 영문 열, UTF-8)
 scripts/label_weather_events.py  # 체감온도·폭염/호우/폭설 라벨, 사건·분석기간 표, 타임라인
 notebook/data_read.ipynb         # 기상자료 pandas 읽기 확인
-tests/test_weather_events.py     # 사건 묶기·적설 결측·분석기간 검증
+tests/test_weather_events.py     # 사건 묶기·적설 결측·분석기간·사건 겹침 처리 검증
 ```
 
 ```bash
