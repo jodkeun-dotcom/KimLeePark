@@ -1,7 +1,9 @@
 import unittest
 import numpy as np
 import pandas as pd
-from scripts.compute_recovery import compute, expected_sales, load_daily, recovery_day
+from scripts import prepare_priority
+from scripts.compute_recovery import (HANDOFF_KEY, HANDOFF_RECOVERY, compute, expected_sales, handoff, load_daily,
+                                      recovery_day)
 from scripts.label_weather_events import add_features, event_windows, group_events
 
 D = pd.Timestamp
@@ -83,6 +85,41 @@ class RecoveryComputeTests(unittest.TestCase):
         self.assertTrue(np.allclose(hansik.expected.dropna(), 100))
         # 잠정 공휴일 8/15는 예측하지 않는다
         self.assertTrue(hansik.set_index('date').expected.isna()[D('2025-08-15')])
+
+    def test_handoff_keys_unique_when_windows_coincide(self):
+        # HEAT02(8/10)는 다음 사건이 없어 effective·nominal 끝이 같다 → 비교용 metrics에서는 공통 키가 겹친다
+        _, metrics = compute(load_daily_frame(self.daily), self.events, self.windows)
+        both = metrics[metrics.event_id == 'HEAT02']
+        self.assertEqual(set(both.window_type), {'effective', 'nominal'})
+        self.assertTrue(both.duplicated(HANDOFF_KEY).any())
+        out = handoff(metrics)
+        self.assertEqual(list(out.columns), HANDOFF_KEY + HANDOFF_RECOVERY)
+        self.assertFalse(out.duplicated(HANDOFF_KEY).any())
+        self.assertEqual(len(out), (metrics.window_type == 'effective').sum())
+        # 주 결과(effective) 값만 담는다: HEAT01 노래방은 절단 창에서 censored (nominal에서는 recovered)
+        row = out[(out.event_id == 'HEAT01') & (out.industry == '노래방') & (out.age == '30대')].iloc[0]
+        self.assertEqual((row.window_end, row.recovery_status), ('2025-08-09', 'censored'))
+
+    def test_handoff_joins_with_priority_table(self):
+        # 결합 형식이 scripts/prepare_priority.py와 같고, 같은 키의 매출 지표와 1:1로 결합된다
+        self.assertEqual((HANDOFF_KEY, HANDOFF_RECOVERY), (prepare_priority.KEY, prepare_priority.RECOVERY))
+        _, metrics = compute(load_daily_frame(self.daily), self.events, self.windows)
+        recovery = roundtrip(handoff(metrics))
+        sales = recovery[HANDOFF_KEY].assign(**{c: pd.NA for c in prepare_priority.SALES})
+        joined = prepare_priority.join_metrics(sales, recovery)
+        self.assertEqual(len(joined), len(recovery))
+        # 회귀: 두 창을 담은 metrics에서 열만 추리면 키 중복으로 결합이 중단된다
+        with self.assertRaisesRegex(ValueError, 'recovery: missing/duplicate keys'):
+            prepare_priority.join_metrics(sales, roundtrip(metrics[HANDOFF_KEY + HANDOFF_RECOVERY]))
+
+
+def roundtrip(df):
+    """prepare_priority.main()처럼 CSV로 저장 후 키를 문자열로 읽는다."""
+    import io
+    buf = io.StringIO()
+    df.to_csv(buf, index=False)
+    buf.seek(0)
+    return pd.read_csv(buf, dtype={k: str for k in HANDOFF_KEY})
 
 
 def load_daily_frame(df):

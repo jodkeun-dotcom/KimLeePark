@@ -28,6 +28,10 @@ PRIMARY_INDUSTRIES = {
     '할인점/슈퍼마켓/양판점', '농수산물', '정육점', '기타식품', '주류판매', '영화/공연', '게임방/오락실',
     '노래방', '종합레저타운/놀이동산'}
 KEYS = ['region', 'industry', 'age']
+# 팀 결합 형식 (scripts/prepare_priority.py의 KEY, RECOVERY와 같아야 함 — tests/test_recovery.py에서 확인)
+HANDOFF_KEY = ['event_id', 'region', 'industry', 'age', 'window_start', 'window_end']
+HANDOFF_RECOVERY = ['recovery_days', 'recovery_status', 'recovery_uncertainty_note']
+HANDOFF_WINDOW = 'effective'   # 우선순위 결합에 넘기는 주 결과. nominal은 민감도 비교용으로 metrics에만 둔다
 
 
 def load_daily(path):
@@ -97,7 +101,7 @@ def compute(daily, events, windows):
         events[c] = pd.to_datetime(events[c])
     windows = windows.assign(date=pd.to_datetime(windows.date))
     spans = event_spans(events)
-    targets = events[events.type.isin(TARGET_TYPES) & events.baseline_in_period.fillna(False).astype(bool)]
+    targets = events[events.type.isin(TARGET_TYPES) & events.baseline_in_period.eq(True)]
     curves, metrics = [], []
     for ev in targets.itertuples():
         w = windows[(windows.event_id == ev.event_id) & windows.window.isin(['event', 'observation'])]
@@ -207,6 +211,20 @@ def plot_curves(curves, metrics, path, industries):
         plt.close(fig)
 
 
+def handoff(metrics):
+    """지원 우선순위 결합(prepare_priority.join_metrics)용 전달본: 주 결과 창만, 공통 키 + 회복 열.
+
+    recovery_metrics.csv는 effective·nominal을 함께 담아, 두 창의 끝이 같은 사건(예: HEAT05)은 공통 키가 겹친다.
+    창 구분 없이 중복을 지우면 주 결과와 민감도 결과가 섞이므로 window_type을 명시적으로 고른다.
+    """
+    out = metrics.loc[metrics.window_type == HANDOFF_WINDOW, HANDOFF_KEY + HANDOFF_RECOVERY].copy()
+    for c in ['window_start', 'window_end']:
+        out[c] = pd.to_datetime(out[c]).dt.strftime('%Y-%m-%d')
+    if out[HANDOFF_KEY].isna().any().any() or out.duplicated(HANDOFF_KEY).any():
+        raise ValueError('recovery handoff: missing/duplicate keys')
+    return out.reset_index(drop=True)
+
+
 def run(daily_path, events_path, windows_path, output, figures):
     daily = load_daily(daily_path)
     events = pd.read_csv(events_path)
@@ -215,6 +233,7 @@ def run(daily_path, events_path, windows_path, output, figures):
     output.mkdir(parents=True, exist_ok=True)
     curves.to_csv(output / 'recovery_curves.csv', index=False, encoding='utf-8-sig')
     metrics.to_csv(output / 'recovery_metrics.csv', index=False, encoding='utf-8-sig')
+    handoff(metrics).to_csv(output / 'recovery_handoff.csv', index=False, encoding='utf-8-sig')
     plot_curves(curves, metrics, figures, sorted(PRIMARY_INDUSTRIES & set(daily.industry)))
     summary = (metrics[metrics.age == ALL_AGES].groupby(['event_id', 'window_type', 'scope']).recovery_status
                .value_counts().unstack(fill_value=0))

@@ -6,15 +6,15 @@
 ## 실행
 
 ```bash
-# 1) 카드 일별 집계 (PR #25 prepare_card.py, 대회 제공 데이터1을 로컬에 준비)
-python scripts/prepare_card.py --input <로컬 경로>/신한카드_빅콘테스트2026_데이터1.txt --output data/processed/card
+# 1) 카드 일별 집계 (대회 제공 데이터1을 로컬에 준비, README의 데이터 준비 참고)
+python scripts/prepare_card.py --input data/shinhan/shinhan_card_data1.txt --output data/processed/card
 # 2) 기상 사건 (README의 기상자료 명령)
 python scripts/label_weather_events.py
 # 3) 회복 곡선·지표
 python scripts/compute_recovery.py
 ```
 
-`prepare_card.py`는 PR #25(`joeun-data-preparation`)에 있다. 카드 원본·집계와 회복 결과는 모두 로컬에만 두며 `.gitignore`로 제외된다.
+카드 원본·집계와 회복 결과는 모두 로컬에만 두며 `.gitignore`로 제외된다.
 
 ## 계산 방법
 
@@ -52,9 +52,20 @@ python scripts/compute_recovery.py
 
 | 파일 | 내용 |
 |---|---|
-| `data/processed/recovery/recovery_metrics.csv` | 사건 × 업종 × 연령(+ALL) × `window_type`별 회복 지표 |
+| `data/processed/recovery/recovery_metrics.csv` | 사건 × 업종 × 연령(+ALL) × `window_type`별 회복 지표 (주 결과·민감도 비교용) |
+| `data/processed/recovery/recovery_handoff.csv` | **지원 우선순위 결합용 전달본.** `window_type = effective`만, 공통 키 + `recovery_days`, `recovery_status`, `recovery_uncertainty_note` |
 | `data/processed/recovery/recovery_curves.csv` | 사건 기간 + 명목 관찰 14일의 날짜별 실제·예상·비율 (`is_effective`로 절단 구분) |
 | `outputs/recovery/recovery_curves_HEAT0X.png` | 주 분석 18개 업종의 업종 전체 회복 곡선 |
+
+### 전달본과 비교용 파일
+
+`recovery_metrics.csv`는 `effective`와 `nominal`을 함께 담는다. 두 창의 끝이 같은 사건(다음 사건이 없는 HEAT05)은 공통 키 `event_id + region + industry + age + window_start + window_end`가 두 번 나오므로, 이 파일을 그대로 `scripts/prepare_priority.py`에 넣으면 `recovery: missing/duplicate keys`로 중단된다. 결합에는 `recovery_handoff.csv`를 쓴다.
+
+```bash
+python scripts/prepare_priority.py --sales <선하 사건별 매출 지표 CSV> --recovery data/processed/recovery/recovery_handoff.csv --output outputs/priority
+```
+
+전달본은 `effective`(주 결과)를 명시적으로 선택해 만든다. 창 구분 없이 중복을 지우면 주 결과와 민감도 결과가 섞이므로 그렇게 하지 않는다. 키 중복·공란이 있으면 `compute_recovery.py`가 오류로 멈춘다. `nominal` 결과가 필요하면 `recovery_metrics.csv`에서 `window_type`으로 골라 별도로 비교한다.
 
 `recovery_metrics.csv` 주요 열:
 
@@ -75,6 +86,7 @@ python scripts/compute_recovery.py
 - 현재 폭염 사건은 모두 `case_study`다(베이스라인 겹침·관찰기간 절단, docs/weather.md). 사건 수가 3건이라 신뢰구간을 제시하지 않는다.
 - 7월(HEAT03)의 기준선은 7/1~7/22 중 장마철 비사건일로 학습되어 평상시 매출을 낮게 잡았을 수 있다. 80mm 미만 강우일은 사건이 아니라 학습에 포함된다.
 - 이전 사건 이후 회복 중인 날짜도 학습에 포함된다(선하 초안과 동일).
+- 예상 매출은 이 스크립트의 `expected_sales`로 자체 계산한다. 공동 분석 전에는 선하 PR #29의 `daily_predictions.csv`에서 모델·창·결측 처리 가정을 명시적으로 골라 연동하거나, 같은 값인지 검증해야 한다.
 - 카드 자료는 소액·소건수 행이 없는 경우가 있어, 업종 전체(`ALL`)는 그날 관측된 연령 행의 합이다.
 - HEAT04의 `effective` 관찰기간은 3일이라 대부분 `censored` 또는 판단 보류가 된다. `nominal` 결과는 다음 폭염(HEAT05)이 섞인 값이다.
 - 관찰기간·기준값에 따른 변화는 #11에서 민감도 표로 정리한다.
