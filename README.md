@@ -109,6 +109,16 @@ python scripts/label_weather_events.py
 
 사건표는 `data/processed/weather_events/`, 타임라인 그림은 `outputs/`에 생성되며 Git에 포함하지 않습니다. 출처·수집방법·변수·사건 기준과 현재 결과는 [기상자료 설명](docs/weather.md), 포털에서 다시 받는 절차는 [원본 데이터 받는 방법](docs/weather.md#원본-데이터-받는-방법)을 참고합니다. 정제자료 확인용 노트북은 [notebook/data_read.ipynb](notebook/data_read.ipynb)입니다.
 
+### 폭염 이후 회복 곡선 (잠정)
+
+위의 카드 정리(`data/processed/card/daily.csv`)와 기상 사건 라벨링을 실행한 뒤, 폭염 사건별 업종·고객 연령별 실제/예상 매출 비율과 회복일을 계산합니다.
+
+```bash
+python scripts/compute_recovery.py
+```
+
+결과는 `data/processed/recovery/`, 그림은 `outputs/recovery/`에 생성되며 Git에 포함하지 않습니다. 지원 우선순위 결합(`scripts/prepare_priority.py`)에는 주 결과만 담은 `recovery_handoff.csv`를 사용합니다. 회복 기준값은 팀 합의 전 잠정값이며, 계산 방법과 해석 한계는 [회복 곡선·회복 지표](docs/recovery.md)를 참고합니다.
+
 ### 결합·기상 코드 검사
 
 ```bash
