@@ -1,0 +1,8 @@
+/outputs/
+/processed/
+/data/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+.env
