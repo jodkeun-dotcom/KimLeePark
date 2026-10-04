@@ -336,12 +336,11 @@ def plot_timeline(df, events, windows, path):
     plt.close(fig)
 
 
-def run(source, output, figure):
-    df = pd.read_csv(source, parse_dates=['date'])
-    columns, by_date = missing_report(df)
-    df = add_features(df)
-    events = group_events(df)
-    windows = event_windows(events)
+def summarize_counts(df, events):
+    """유형별 사건 수·일수, 역할별 건수와 status.
+
+    status는 유형 규칙(판정 불가·하위 유형·사례연구 유형)을 먼저 보고, 나머지는 실제 statistical 건수로 정한다.
+    """
     dated = events.dropna(subset=['start_date'])
     counts = pd.DataFrame({'type': [label for _, _, label, _ in EVENT_TYPES]})
     counts['events'] = counts.type.map(dated.type.value_counts()).fillna(0).astype(int)
@@ -349,10 +348,28 @@ def run(source, output, figure):
     for role in ['statistical', 'case_study', 'excluded']:
         counts[role] = counts.type.map(dated[dated.analysis_role == role].type.value_counts()).fillna(0).astype(int)
     counts['judgeable'] = [not df[flag].isna().all() for flag, *_ in EVENT_TYPES]
-    counts['status'] = np.select(
-        [~counts.judgeable, counts.type.isin(CASE_STUDY_TYPES), counts.type.isin(NESTED_TYPES)],
-        ['데이터 없음 - 분석 제외', '사례연구 후보 - 정식 통계비교 제외', '상위 사건의 강도 특성 - 정식 통계비교 제외'],
-        '정식 통계비교')
+
+    def status(row):
+        if not row.judgeable:
+            return '데이터 없음 - 분석 제외'
+        if row.type in NESTED_TYPES:
+            return '상위 사건의 강도 특성 - 정식 통계비교 제외'
+        if row.type in CASE_STUDY_TYPES:
+            return '사례연구 후보 - 정식 통계비교 제외'
+        if row.statistical > 0:
+            return f'정식 비교 대상 있음 ({row.statistical}건)'
+        return f'정식 비교 대상 없음 (사례연구 {row.case_study}건, 제외 {row.excluded}건)'
+    counts['status'] = counts.apply(status, axis=1)
+    return counts
+
+
+def run(source, output, figure):
+    df = pd.read_csv(source, parse_dates=['date'])
+    columns, by_date = missing_report(df)
+    df = add_features(df)
+    events = group_events(df)
+    windows = event_windows(events)
+    counts = summarize_counts(df, events)
 
     output.mkdir(parents=True, exist_ok=True)
     df.to_csv(output / 'weather_daily_events.csv', index=False, encoding='utf-8-sig')

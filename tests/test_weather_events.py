@@ -2,7 +2,7 @@ import unittest
 from unittest import mock
 import pandas as pd
 from scripts import label_weather_events
-from scripts.label_weather_events import add_features, apparent_temp_summer, event_windows, group_events
+from scripts.label_weather_events import add_features, apparent_temp_summer, event_windows, group_events, summarize_counts
 
 D = pd.Timestamp
 
@@ -100,6 +100,35 @@ class WeatherEventTests(unittest.TestCase):
         self.assertEqual(len(base), 7)
         self.assertNotIn(D('2025-07-13'), set(base[base.is_effective].date))
         self.assertEqual(base.set_index('date').loc[D('2025-07-13'), 'overlap_event_id'], 'RAIN01')
+
+    def counts_status(self):
+        # 7/17 강한 폭염, 7/21 폭염(7/17 관찰 절단·7/21 베이스라인 겹침), 8/4 호우, 적설 전 기간 결측
+        temps = [20] * 7 + [36] + [20] * 3 + [34] + [20] * 20      # 7/10~8/10
+        rain = [None] * 25 + [90] + [None] * 6
+        df = add_features(self.frame(temps, rain=rain))
+        return summarize_counts(df, group_events(df)).set_index('type')
+
+    def test_counts_status_without_statistical_events(self):
+        counts = self.counts_status()
+        heat = counts.loc['폭염']
+        self.assertEqual((heat.statistical, heat.case_study, heat.excluded), (0, 2, 0))
+        self.assertEqual(heat.status, '정식 비교 대상 없음 (사례연구 2건, 제외 0건)')
+        self.assertNotIn('정식 비교 대상 있음', heat.status)
+        # 회귀: statistical이 0인데 구 문구 '정식 통계비교'로 표시하지 않는다
+        self.assertNotEqual(heat.status, '정식 통계비교')
+        self.assertFalse(heat.status.startswith('정식 통계비교'))
+
+    def test_counts_status_with_statistical_events(self):
+        with mock.patch.object(label_weather_events, 'MIN_DAYS', 3):
+            heat = self.counts_status().loc['폭염']
+        self.assertGreater(heat.statistical, 0)
+        self.assertEqual(heat.status, f'정식 비교 대상 있음 ({heat.statistical}건)')
+
+    def test_counts_status_type_rules_kept(self):
+        counts = self.counts_status()
+        self.assertEqual(counts.loc['폭설', 'status'], '데이터 없음 - 분석 제외')
+        self.assertEqual(counts.loc['강한 폭염', 'status'], '상위 사건의 강도 특성 - 정식 통계비교 제외')
+        self.assertEqual(counts.loc['호우', 'status'], '사례연구 후보 - 정식 통계비교 제외')
 
 
 if __name__ == '__main__':
