@@ -1,8 +1,19 @@
-/outputs/
+# Keep data local; track only setup instructions and inventory metadata.
+/data/**
+!/data/README.md
+!/data/manifest.json
+
+# Local analysis outputs.
 /processed/
-/data/
+/outputs/
+
+# Python, notebooks and local environments.
 __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
 .venv/
 .env
+.env.*
+!.env.example
+.DS_Store
+
