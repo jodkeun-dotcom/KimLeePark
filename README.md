@@ -52,7 +52,7 @@
 - Git
 - 공모전에서 제공받은 데이터 파일
 
-제공 원본·레이아웃·정제 데이터는 저장소에 포함하지 않습니다. 전처리 전에 참가자가 제공받은 입력 파일을 로컬에 준비해야 합니다. 가상자료 결합 검사는 제공 데이터 없이 실행할 수 있습니다.
+대회 제공 원본·레이아웃과 해당 정제 데이터는 저장소에 포함하지 않습니다. 전처리 전에 참가자가 제공받은 입력 파일을 로컬에 준비해야 합니다. 공개 기상청 자료는 아래에 명시한 원본·정제본 2개를 포함합니다. 가상자료 검사는 대회 제공 데이터 없이 실행할 수 있습니다.
 
 ### 저장소 다운로드 및 패키지 설치
 
@@ -64,7 +64,7 @@ python -m pip install -r requirements.txt
 
 ### 데이터 준비
 
-제공받은 파일을 로컬 환경의 다음 경로에 보관합니다. `data/README.md`와 `data/manifest.json`만 Git으로 관리하고, 나머지 `data/` 하위 파일은 `.gitignore`로 제외합니다.
+제공받은 파일을 로컬 환경의 다음 경로에 보관합니다. `data/README.md`, `data/manifest.json`과 아래 공개 기상자료 2개만 Git으로 관리하고, 나머지 `data/` 하위 파일은 `.gitignore`로 제외합니다.
 
 ```text
 data/
@@ -73,7 +73,11 @@ data/
 ├── skt/              # 로컬 SKT 원본 CSV 또는 CSV.GZ
 ├── shinhan/          # 로컬 신한카드 원본 TXT 또는 TXT.GZ
 ├── layouts/          # 로컬 제공기관 레이아웃 설명서
-└── processed/        # 코드 실행으로 생성하는 로컬 정제 결과
+├── raw/wether/
+│   └── OBS_ASOS_DD_20261001161226.csv  # 공개 기상청 원본 (Git 관리)
+└── processed/
+    ├── weather.csv  # 공개 기상 정제본 (Git 관리)
+    └── ...          # 카드·SKT 정제 및 사건 산출물 (로컬 보관)
 ```
 
 SKT 원본 18개를 `data/skt/`에 준비합니다. 신한카드 데이터1은 아래 예시에서 `data/shinhan/shinhan_card_data1.txt`로 복사해 사용합니다. 원래 파일명을 유지한다면 명령의 `--input`을 실제 경로로 바꾸면 됩니다. 자세한 파일 구성과 중복 제거 기준은 [데이터 준비 안내](data/README.md)를 참고합니다.
@@ -94,7 +98,18 @@ python scripts/prepare_card.py \
 
 위 명령은 로컬에 준비한 입력을 사용합니다. 두 전처리 코드는 압축된 CSV.GZ/TXT.GZ도 지원합니다. SKT 코드는 지정된 12월 파일의 완전 중복을 제거하며, 이미 중복 제거된 입력이면 추가 제거 행수는 0입니다. 출력은 `data/processed/`에 생성되며 Git에 포함하지 않습니다. [10월 1일 결과 목록](docs/status_1001.md)에서 검증 기록과 확인 대기 항목을 확인할 수 있습니다.
 
-### 결합 코드 검사
+### 기상자료 정리 및 사건 라벨링
+
+춘천 ASOS(관측소 101) 일자료를 정제하고 폭염·호우·폭설 사건을 라벨링합니다. 원본은 CP949이고 정제본은 UTF-8입니다. 저장소에 공개 기상 원본과 정제본이 포함되어 있어 다음 명령을 바로 실행할 수 있습니다.
+
+```bash
+python scripts/prepare_weather.py --input data/raw/wether/OBS_ASOS_DD_20261001161226.csv --output data/processed/weather.csv
+python scripts/label_weather_events.py
+```
+
+사건표는 `data/processed/weather_events/`, 타임라인 그림은 `outputs/`에 생성되며 Git에 포함하지 않습니다. 출처·수집방법·변수·사건 기준과 현재 결과는 [기상자료 설명](docs/weather.md), 포털에서 다시 받는 절차는 [원본 데이터 받는 방법](docs/weather.md#원본-데이터-받는-방법)을 참고합니다. 정제자료 확인용 노트북은 [notebook/data_read.ipynb](notebook/data_read.ipynb)입니다.
+
+### 결합·기상 코드 검사
 
 ```bash
 python -m unittest discover -s tests -v

@@ -1,11 +1,31 @@
-# Keep data local; track only setup instructions and inventory metadata.
+# Keep provided data and local analysis outputs out of Git.
+**/data/*
+*.csv
+*.csv.gz
+*.xlsx
+*.xls
+*.parquet
+*.zip
+
+# Shared setup instructions and inventory metadata.
 /data/**
 !/data/README.md
 !/data/manifest.json
 
+# Public KMA weather inputs: allow these two files only.
+!/data/raw/
+/data/raw/*
+!/data/raw/wether/
+/data/raw/wether/*
+!/data/raw/wether/OBS_ASOS_DD_20261001161226.csv
+!/data/processed/
+/data/processed/*
+!/data/processed/weather.csv
+
 # Local analysis outputs.
 /processed/
 /outputs/
+outputs/
 
 # Python, notebooks and local environments.
 __pycache__/
@@ -14,5 +34,6 @@ __pycache__/
 .venv/
 .env
 .env.*
+.env*
 !.env.example
 .DS_Store
