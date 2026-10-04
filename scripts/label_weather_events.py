@@ -15,6 +15,7 @@ BASELINE_DAYS, OBSERVATION_DAYS = 7, 14
 MAX_GAP_DAYS = 2                    # 같은 유형 사건 사이 비사건일이 2일 이내면 하나의 사건으로 병합
 CASE_STUDY_TYPES = {'호우'}          # 사건 수가 적어 정식 통계비교 대신 사례연구로 다루는 유형
 NO_DATA_TYPES = {'폭설'}             # 원자료에 값이 없어 판정 불가한 유형
+NESTED_TYPES = {'강한 폭염': '폭염'}  # 하위 유형: 항상 상위 유형 사건 안에 있어 독립 회복 사건으로 비교하지 않음
 REQUIRED = {
     'temp_max_c': '최고기온', 'humidity_min_pct': '최소 상대습도', 'humidity_avg_pct': '평균 상대습도',
     'precip_mm': '일강수량', 'new_snow_max_cm': '일 최심신적설', 'wind_avg_ms': '평균 풍속',
@@ -105,7 +106,7 @@ def group_events(df):
                 'baseline_start': s - pd.Timedelta(days=BASELINE_DAYS), 'baseline_end': s - pd.Timedelta(days=1),
                 'observation_start': e + pd.Timedelta(days=1), 'observation_end': e + pd.Timedelta(days=OBSERVATION_DAYS),
             })
-    events = pd.DataFrame(rows, columns=EVENT_COLUMNS)
+    events = link_nested(pd.DataFrame(rows, columns=EVENT_COLUMNS), df)
     any_event = df.set_index('date').is_any_event
 
     def event_days(a, b):
@@ -122,9 +123,26 @@ def group_events(df):
             events.loc[len(events), ['event_id', 'type', 'analysis_role', 'exclude_reason']] = [
                 f'{prefix}_NA', label, 'excluded', '데이터 없음: 적설 열이 전 기간 결측이라 판정 불가']
     # 빈 행 추가로 실수형이 된 정수·불리언 열 복원
-    ints = ['duration_days', 'event_days', 'baseline_event_days', 'observation_event_days']
+    ints = ['duration_days', 'event_days', 'baseline_event_days', 'observation_event_days', 'severe_event_days']
     events[ints] = events[ints].astype('Int64')
     events[['baseline_in_period', 'observation_in_period']] = events[['baseline_in_period', 'observation_in_period']].astype('boolean')
+    return events
+
+
+def link_nested(events, df):
+    """강한 폭염을 포함하는 폭염 사건(parent_event_id)을 찾고, 폭염 사건에 강한 폭염 일수를 남긴다."""
+    events = events.copy()
+    events['parent_event_id'] = None
+    for child, parent in NESTED_TYPES.items():
+        parents = events[events.type == parent]
+        for i, ev in events[events.type == child].iterrows():
+            hit = parents[(parents.start_date <= ev.start_date) & (parents.end_date >= ev.end_date)]
+            events.loc[i, 'parent_event_id'] = hit.event_id.iloc[0] if len(hit) else None
+    severe = df.set_index('date').is_severe_heatwave
+    heat = events.type == '폭염'
+    events['severe_event_days'] = pd.NA
+    events.loc[heat, 'severe_event_days'] = [
+        int(severe.loc[s:e].sum()) for s, e in zip(events.start_date[heat], events.end_date[heat])]
     return events
 
 
@@ -136,6 +154,11 @@ def assign_roles(events):
     case = events.type.isin(CASE_STUDY_TYPES)
     events.loc[case, 'analysis_role'] = 'case_study'
     events.loc[case, 'exclude_reason'] = '사례연구 후보: 사건 수가 적어 정식 통계비교 제외'
+    nested = events.parent_event_id.notna()
+    events.loc[nested, 'analysis_role'] = 'case_study'
+    events.loc[nested, 'exclude_reason'] = [
+        f'일반 폭염 사건 {p} 내부의 강도 특성: 독립 회복 사건으로 비교하지 않음 ({p}.severe_event_days에 반영)'
+        for p in events.parent_event_id[nested]]
     # 베이스라인이 카드 자료 시작일 이전에 걸리면 비교 기준이 없으므로 자동 제외(사례연구보다 우선)
     out = ~events.baseline_in_period.astype(bool)
     events.loc[out, 'analysis_role'] = 'excluded'
@@ -235,8 +258,9 @@ def run(source, output, figure):
         counts[role] = counts.type.map(dated[dated.analysis_role == role].type.value_counts()).fillna(0).astype(int)
     counts['judgeable'] = [not df[flag].isna().all() for flag, *_ in EVENT_TYPES]
     counts['status'] = np.select(
-        [~counts.judgeable, counts.type.isin(CASE_STUDY_TYPES)],
-        ['데이터 없음 - 분석 제외', '사례연구 후보 - 정식 통계비교 제외'], '정식 통계비교')
+        [~counts.judgeable, counts.type.isin(CASE_STUDY_TYPES), counts.type.isin(NESTED_TYPES)],
+        ['데이터 없음 - 분석 제외', '사례연구 후보 - 정식 통계비교 제외', '상위 사건의 강도 특성 - 정식 통계비교 제외'],
+        '정식 통계비교')
 
     output.mkdir(parents=True, exist_ok=True)
     df.to_csv(output / 'weather_daily_events.csv', index=False, encoding='utf-8-sig')

@@ -24,6 +24,13 @@ class WeatherEventTests(unittest.TestCase):
         rain = events[events.type == '호우']
         self.assertEqual(rain.analysis_role.tolist(), ['case_study'])
 
+    def test_severe_heatwave_is_parent_attribute(self):
+        # 강한 폭염은 폭염 사건 내부의 강도 특성: 사례연구로 두고 부모 사건에 일수를 남긴다
+        events = group_events(add_features(self.frame([20] * 8 + [34, 36, 34, 20])))
+        severe = events[events.type == '강한 폭염'].iloc[0]
+        self.assertEqual((severe.parent_event_id, severe.analysis_role), ('HEAT01', 'case_study'))
+        self.assertEqual(events.set_index('event_id').loc['HEAT01', 'severe_event_days'], 1)
+
     def test_baseline_before_period_excluded(self):
         df = self.frame([36, 20])
         df['date'] = pd.date_range('2025-07-03', periods=2)
