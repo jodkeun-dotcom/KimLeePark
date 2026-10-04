@@ -171,6 +171,16 @@ Tw(습구온도) = Ta·atan[0.151977(RH+8.313659)^½] + atan(Ta+RH) − atan(RH�
 
 `data/processed/weather_events/`와 `outputs/`는 스크립트로 재생성하므로 저장소에 포함하지 않는다.
 
+`weather_event_counts.csv`의 `status`는 위에서부터 먼저 해당하는 값을 쓴다. 유형 규칙에 걸리지 않는 유형은 실제 `statistical` 건수로 정한다.
+
+| status | 조건 |
+|---|---|
+| `데이터 없음 - 분석 제외` | 판정에 필요한 열이 전 기간 결측 (`judgeable = False`, 폭설) |
+| `상위 사건의 강도 특성 - 정식 통계비교 제외` | 하위 유형 (강한 폭염) |
+| `사례연구 후보 - 정식 통계비교 제외` | 사례연구 유형 (호우) |
+| `정식 비교 대상 있음 (n건)` | 그 외 유형 중 `statistical`이 1건 이상 |
+| `정식 비교 대상 없음 (사례연구 a건, 제외 b건)` | 그 외 유형 중 `statistical`이 0건 (현재 `MIN_DAYS = 7`의 폭염) |
+
 `weather_events.csv` 열:
 
 | 열 | 내용 |
