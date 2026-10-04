@@ -1,19 +1,18 @@
+# Keep provided data and local analysis outputs out of Git.
 **/data/*
-outputs/
 *.csv
 *.csv.gz
 *.xlsx
 *.xls
 *.parquet
 *.zip
-.env*
-__pycache__/
-*.pyc
-.venv/
-.DS_Store
 
-# 공개 기상자료(기상청 ASOS)만 예외로 추적한다. 카드·SKT 등 대회 제공 자료는 계속 제외.
-# 상위 폴더를 하나씩 다시 포함해야 하위 파일 예외가 적용된다. 스크립트 산출물(weather_events/)은 제외.
+# Shared setup instructions and inventory metadata.
+/data/**
+!/data/README.md
+!/data/manifest.json
+
+# Public KMA weather inputs: allow these two files only.
 !/data/raw/
 /data/raw/*
 !/data/raw/wether/
@@ -22,3 +21,19 @@ __pycache__/
 !/data/processed/
 /data/processed/*
 !/data/processed/weather.csv
+
+# Local analysis outputs.
+/processed/
+/outputs/
+outputs/
+
+# Python, notebooks and local environments.
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+.env
+.env.*
+.env*
+!.env.example
+.DS_Store
