@@ -19,10 +19,39 @@ PRIMARY = ['한식', '중식', '일식', '양식', '기타요식', '제과점', 
            '노래방', '종합레저타운/놀이동산']
 STATUS_KO = {'no_decline': '사건 감소 기준 미충족', 'recovered': '회복', 'censored': '관찰기간 내 회복 미확인',
              'insufficient_data': '자료 부족'}
-CURVE_COLUMNS = ['event_id', 'industry', 'age', 'date', 'window', 'day_offset', 'ratio',
-                 'ratio_paired_exploratory', 'is_holiday', 'recovery_threshold', 'consecutive_days']
-METRIC_COLUMNS = ['event_id', 'industry', 'age', 'event_end', 'window_end', 'observation_days',
-                  'observation_days_paired', 'event_ratio', 'recovery_status', 'recovery_days']
+UNIT = ['event_id', 'region', 'industry', 'age']
+CURVE_COLUMNS = UNIT + ['date', 'window', 'day_offset', 'ratio', 'ratio_paired_exploratory', 'is_holiday',
+                        'window_start', 'window_end', 'recovery_threshold', 'consecutive_days']
+METRIC_COLUMNS = UNIT + ['window_start', 'window_end', 'event_end', 'observation_days', 'observation_days_paired',
+                         'event_ratio', 'recovery_status', 'recovery_days', 'recovery_threshold', 'consecutive_days']
+
+
+def single_rule(frame, name):
+    rules = frame[['recovery_threshold', 'consecutive_days']].drop_duplicates()
+    if len(rules) != 1:
+        raise ValueError(f'{name} must come from a single recovery rule')
+    return round(float(rules.recovery_threshold.iloc[0]), 6), int(rules.consecutive_days.iloc[0])
+
+
+def check_same_windows(c, m):
+    """곡선과 지표가 같은 단위·관찰창에서 나왔는지 확인한다. 하나라도 다르면 그림을 만들지 않는다."""
+    units = c[UNIT].drop_duplicates().merge(m[UNIT], on=UNIT, how='outer', indicator=True)
+    if not units._merge.eq('both').all():
+        raise ValueError('curves and metrics cover different event/region/industry/age units')
+    derived = c.groupby(UNIT).agg(curve_window_start=('window_start', 'first'), curve_window_end=('window_end', 'first'),
+                                  curve_starts=('window_start', 'nunique'), curve_ends=('window_end', 'nunique'),
+                                  curve_event_end=('date', lambda d: d[c.loc[d.index, 'window'].eq('event')].max()),
+                                  curve_observation_days=('window', lambda w: int(w.eq('observation').sum())))
+    if derived.curve_starts.gt(1).any() or derived.curve_ends.gt(1).any():
+        raise ValueError('curves have more than one window per unit')
+    joined = m.set_index(UNIT).join(derived, how='inner')
+    for left, right in [('window_start', 'curve_window_start'), ('window_end', 'curve_window_end')]:
+        if not pd.to_datetime(joined[left]).eq(pd.to_datetime(joined[right])).all():
+            raise ValueError(f'curves and metrics disagree on {left}')
+    if not pd.to_datetime(joined.event_end).eq(joined.curve_event_end).all():
+        raise ValueError('curves and metrics disagree on event_end')
+    if not joined.observation_days.astype(int).eq(joined.curve_observation_days).all():
+        raise ValueError('curves and metrics disagree on observation_days')
 
 
 def panel_data(curves, metrics, industries=PRIMARY):
@@ -31,28 +60,26 @@ def panel_data(curves, metrics, industries=PRIMARY):
         missing = set(columns) - set(frame)
         if missing:
             raise ValueError(f'{name} missing columns: {sorted(missing)}')
-    rules = curves[['recovery_threshold', 'consecutive_days']].drop_duplicates()
-    if len(rules) != 1:
-        raise ValueError('curves must come from a single recovery rule')
     c = curves[curves.age.eq('ALL') & curves.industry.isin(industries)].copy()
     m = metrics[metrics.age.eq('ALL') & metrics.industry.isin(industries)].copy()
     if c.empty or m.empty:
         raise ValueError('no industry-total rows for the selected industries')
-    if m.duplicated(['event_id', 'industry']).any():
-        raise ValueError('duplicate event/industry metrics')
+    threshold, run = single_rule(c, 'curves')
+    if single_rule(m, 'metrics') != (threshold, run):
+        raise ValueError('curves and metrics use different recovery rules')
+    if m.duplicated(UNIT).any():
+        raise ValueError('duplicate event/region/industry/age metrics')
     c['date'] = pd.to_datetime(c.date)
+    check_same_windows(c, m)
     c['is_holiday'] = c.is_holiday.astype(str).str.lower().eq('true')
     # 판정에 쓰지 않는 부분 연령 날짜의 비율은 탐색용으로만 따로 둔다
     c['ratio_partial_only'] = c.ratio_paired_exploratory.where(c.ratio.isna())
-    shared = [col for col in METRIC_COLUMNS if col in c and col not in ('event_id', 'industry', 'age')]
-    c = c.drop(columns=shared).merge(m[METRIC_COLUMNS], on=['event_id', 'industry', 'age'], how='left',
-                                     validate='many_to_one')
-    if c.recovery_status.isna().any():
-        raise ValueError('curve rows without matching metrics')
+    # 창·기준이 같음을 확인했으므로 지표 열은 곡선과 겹치지 않는 것만 붙인다
+    extra = [col for col in METRIC_COLUMNS if col not in c or col in UNIT]
+    c = c.merge(m[extra], on=UNIT, how='left', validate='many_to_one')
     rd = pd.to_numeric(c.recovery_days, errors='coerce')
-    c['confirmation_day'] = rd + int(rules.consecutive_days.iloc[0]) - 1
-    return c.sort_values(['event_id', 'industry', 'date']), float(rules.recovery_threshold.iloc[0]), \
-        int(rules.consecutive_days.iloc[0])
+    c['confirmation_day'] = rd + run - 1
+    return c.sort_values(['event_id', 'industry', 'date']), threshold, run
 
 
 def event_caption(g, threshold, run):

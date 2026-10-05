@@ -77,19 +77,22 @@ class RuleStabilityTests(unittest.TestCase):
 
 
 def curve_inputs(status='recovered', observed=5, recovery_days=2.0):
+    """사건 2일 + 실제 관찰 observed일. 곡선·지표가 같은 기준(0.95·3일)과 관찰창을 갖는다."""
     dates = pd.date_range('2025-08-01', periods=2 + observed)
+    start, end = dates[0].strftime('%Y-%m-%d'), dates[-1].strftime('%Y-%m-%d')
     rows = []
     for i, date in enumerate(dates):
-        rows.append(dict(event_id='E1', industry='한식', age='ALL', date=date.strftime('%Y-%m-%d'),
+        rows.append(dict(event_id='E1', region='R', industry='한식', age='ALL', date=date.strftime('%Y-%m-%d'),
                          window='event' if i < 2 else 'observation', day_offset=i - 1,
                          ratio=np.nan if i == 3 else 0.8 + 0.1 * i,
                          ratio_paired_exploratory=0.5 + 0.1 * i, is_holiday=i == 4,
-                         recovery_threshold=0.95, consecutive_days=3, window_end='x'))
+                         window_start=start, window_end=end, recovery_threshold=0.95, consecutive_days=3))
     curves = pd.DataFrame(rows)
-    metrics = pd.DataFrame([dict(event_id='E1', industry='한식', age='ALL', event_end='2025-08-02',
-                                 window_end=dates[-1].strftime('%Y-%m-%d'), observation_days=observed,
+    metrics = pd.DataFrame([dict(event_id='E1', region='R', industry='한식', age='ALL', window_start=start,
+                                 window_end=end, event_end='2025-08-02', observation_days=observed,
                                  observation_days_paired=observed - 1, event_ratio=0.85,
-                                 recovery_status=status, recovery_days=recovery_days)])
+                                 recovery_status=status, recovery_days=recovery_days,
+                                 recovery_threshold=0.95, consecutive_days=3)])
     return curves, metrics
 
 
@@ -114,6 +117,24 @@ class FinalCurveTests(unittest.TestCase):
             fc.panel_data(mixed, metrics, ['한식'])
         with self.assertRaises(ValueError):
             fc.panel_data(curves, metrics.assign(industry='중식'), ['한식'])
+
+    def test_mismatched_rule_or_window_rejected(self):
+        # 리뷰 지적: 서로 다른 회복 기준·관찰창의 곡선과 지표를 합치면 그림 전에 실패해야 한다
+        curves, metrics = curve_inputs()
+        cases = {
+            'rule': metrics.assign(recovery_threshold=0.90, consecutive_days=2),
+            'window_end': metrics.assign(window_end='2025-08-09'),
+            'event_end': metrics.assign(event_end='2025-08-03'),
+            'observation_days': metrics.assign(observation_days=4),
+            'region': metrics.assign(region='X'),
+        }
+        for name, bad in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(ValueError):
+                    fc.panel_data(curves, bad, ['한식'])
+        extra = pd.concat([metrics, metrics.assign(event_id='E2')])
+        with self.assertRaisesRegex(ValueError, 'different'):
+            fc.panel_data(curves, extra, ['한식'])
 
     def test_plot_writes_figure(self):
         curves, metrics = curve_inputs()
