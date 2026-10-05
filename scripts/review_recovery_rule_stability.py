@@ -8,6 +8,8 @@ Within the agreed baseline (weekday mean) the other 8 recovery rules are compare
 - settings_differing: how many of the 8 give a different review_queue
 - threshold / run axis: whether changing only the threshold (run 3) or only the run (0.95) changes it
 - rule_sensitivity: stable (0), low (1 to HIGH_SHARE of 8 minus one), high (at least HIGH_SHARE of 8)
+  'stable' means the support-review state (review_queue) is the same under the 9 weekday-mean rules.
+  It does not mean recovery_status is the same; that is counted separately.
 The median baseline is reported separately (same rule) and is not mixed into the label.
 
 Outputs stay local. *_PRIVATE_REVIEW_ONLY.csv has industry names; the summary CSVs have counts only.
@@ -76,6 +78,8 @@ def unit_stability(frame):
             'reference_priority_tier': ref.priority_tier,
             'mean_rule_settings_differing': changed, 'mean_rule_alternatives': len(others),
             'mean_rule_queues_seen': ', '.join(sorted(set(mean.review_queue))),
+            # 지원 검토 상태는 같아도 회복 판정 자체는 바뀔 수 있다 (상위 분류가 가리는 변화)
+            'mean_rule_recovery_status_differing': int(others.recovery_status.ne(ref.recovery_status).sum()),
             'threshold_axis_changes': bool(by_threshold.review_queue.ne(ref.review_queue).any()),
             'run_axis_changes': bool(by_run.review_queue.ne(ref.review_queue).any()),
             'rule_sensitivity': 'stable' if changed == 0 else 'high' if changed >= n_high else 'low',
@@ -99,7 +103,10 @@ def summaries(units):
     by_queue = (units.groupby(['scope', 'reference_review_queue', 'rule_sensitivity']).size()
                 .unstack('rule_sensitivity', fill_value=0).reindex(columns=['stable', 'low', 'high'], fill_value=0)
                 .reset_index())
+    units = units.assign(stable_queue_status_changes=units.rule_sensitivity.eq('stable')
+                         & units.mean_rule_recovery_status_differing.gt(0))
     axes = (units.groupby(['scope']).agg(units=('industry', 'size'),
+                                         stable_queue_but_status_changes=('stable_queue_status_changes', 'sum'),
                                          threshold_axis_changes=('threshold_axis_changes', 'sum'),
                                          run_axis_changes=('run_axis_changes', 'sum'),
                                          median_same_rule_differs=('median_same_rule_differs', 'sum'),

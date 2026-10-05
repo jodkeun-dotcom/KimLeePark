@@ -61,6 +61,16 @@ class RuleStabilityTests(unittest.TestCase):
                          ('low', 1))
         self.assertFalse(units.loc['B', 'threshold_axis_changes'])
 
+    def test_stable_queue_can_hide_recovery_status_changes(self):
+        # 지원 검토 상태는 모든 규칙에서 같지만 회복 판정은 연속 4일에서 달라지는 경우
+        frame = sensitivity_frame(lambda industry, model, threshold, run: ('no_positive_net_shortfall', np.nan))
+        frame.loc[frame.consecutive_days.eq(4), 'recovery_status'] = 'censored'
+        units = rs.unit_stability(rs.load_frame(frame)).set_index('industry')
+        self.assertEqual(units.loc['A', 'rule_sensitivity'], 'stable')
+        self.assertEqual(units.loc['A', 'mean_rule_recovery_status_differing'], 3)
+        _, _, axes = rs.summaries(units.reset_index())
+        self.assertEqual(axes.loc[0, 'stable_queue_but_status_changes'], 2)
+
     def test_summaries_have_counts_only(self):
         units = rs.unit_stability(rs.load_frame(sensitivity_frame(b_changes)))
         label, by_queue, axes = rs.summaries(units)
