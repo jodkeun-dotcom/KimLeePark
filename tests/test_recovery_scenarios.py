@@ -133,11 +133,43 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(grid[sc.SETTING].drop_duplicates().shape[0], 4)
         # 회귀: 실제 관찰일수(가상자료 1일)를 시나리오 명목 길이(14일)로 덮어쓰지 않는다
         self.assertTrue(grid.observation_days.eq(1).all())
-        self.assertTrue(grid.scenario_observation_days.eq(14).all())
+        self.assertTrue(grid.nominal_observation_days.eq(14).all())
         self.assertEqual(set(grid.scope), {'ALL', 'age'})
         self.assertTrue(grid.recovery_status.isin(sc.STATUSES).all())
         with self.assertRaises(ValueError):
             sc.recovery_grid(data, [('S9', 2, 14)], [0.95], [3])
+
+
+def windowed_inputs(spec):
+    """사건마다 1일 사건 + 실제 관찰 n일인 가상 입력. spec: {event_id: (시작일, 실제 관찰일수)}."""
+    rows, events = [], []
+    for event, (start, observed) in spec.items():
+        dates = pd.date_range(start, periods=1 + observed)
+        end = dates[-1].strftime('%Y-%m-%d')
+        for i, date in enumerate(dates):
+            for age in ['20대', '30대']:
+                rows.append(dict(event_id=event, region='R', industry='A', age=age, window_start=start, window_end=end,
+                                 date=date.strftime('%Y-%m-%d'), amount=50. if i == 0 else 100., prediction=100.,
+                                 window_type='effective', baseline_mode='fixed_pre_event',
+                                 missing_policy='exclude_missing', model_id='weekday_mean', is_holiday=False,
+                                 phase='event' if i == 0 else 'observation', analysis_role='case_study'))
+        events.append(dict(event_id=event, start_date=start, end_date=start, observation_end_effective=end,
+                           analysis_role='case_study'))
+    d = pd.DataFrame(rows)
+    return d, baseline.industry_daily(d), pd.DataFrame(events), None
+
+
+class ObservationDaysTests(unittest.TestCase):
+    def test_actual_and_nominal_observation_days_are_both_kept(self):
+        # CUT: 명목 14일이지만 다음 사건에서 절단되어 실제 3일 / FULL: 절단 없이 실제 = 명목 14일
+        data = {'S0': windowed_inputs({'CUT': ('2025-08-01', 3), 'FULL': ('2025-09-01', 14)})}
+        grid = sc.recovery_grid(data, [('S0', 2, 14)], [0.95], [3]).set_index(['event_id', 'age'])
+        self.assertEqual(grid.loc[('CUT', 'ALL'), ['observation_days', 'nominal_observation_days']].tolist(), [3, 14])
+        self.assertEqual(grid.loc[('FULL', 'ALL'), ['observation_days', 'nominal_observation_days']].tolist(), [14, 14])
+        self.assertTrue(grid.observation_days.le(grid.nominal_observation_days).all())
+        # 관찰 3일 모두 기준 이상이므로 절단 창에서도 3일 연속 회복이 판정된다 (첫 관찰일 = 회복일)
+        self.assertEqual((grid.loc[('CUT', 'ALL'), 'recovery_status'], grid.loc[('CUT', 'ALL'), 'recovery_days']),
+                         ('recovered', 1))
 
 
 class ShortfallTests(unittest.TestCase):

@@ -65,8 +65,9 @@ def recovery_grid(inputs, scenarios, thresholds, runs):
         for threshold in thresholds:
             for run in runs:
                 _, metrics = common.compute(predictions, industry, events, threshold, run, metadata)
-                # observation_days는 compute가 센 실제(절단 후) 관찰일수다. 시나리오의 명목 길이는 따로 둔다.
-                metrics = metrics.assign(scenario=name, max_gap_days=gap, scenario_observation_days=days,
+                # observation_days = compute가 센 실제(절단 후) 관찰일수. 덮어쓰지 않는다.
+                # nominal_observation_days = 시나리오 설정값(명목 관찰기간 길이).
+                metrics = metrics.assign(scenario=name, max_gap_days=gap, nominal_observation_days=days,
                                          threshold=threshold, consecutive_days=run)
                 parts.append(metrics)
     if not parts:
@@ -152,9 +153,9 @@ def shortfall_by_scenario(inputs, scenarios):
         predictions, _, events, metadata = inputs[name]
         _, diagnostic = sales.build(predictions, events, metadata)
         ends = events.set_index('event_id').end_date
-        diagnostic = diagnostic.assign(scenario=name, max_gap_days=gap, scenario_observation_days=days,
+        diagnostic = diagnostic.assign(scenario=name, max_gap_days=gap, nominal_observation_days=days,
                                        event_end=diagnostic.event_id.map(ends))
-        parts.append(diagnostic[UNIT + ['scenario', 'max_gap_days', 'scenario_observation_days', 'window_end',
+        parts.append(diagnostic[UNIT + ['scenario', 'max_gap_days', 'nominal_observation_days', 'window_end',
                                         'net_shortfall_nonholiday', 'net_rate_nonholiday']])
     if not parts:
         raise ValueError('no scenarios for shortfall comparison')
@@ -225,7 +226,7 @@ def event_windows_by_scenario(inputs, scenarios):
     for name, gap, days in scenarios:
         events = inputs[name][2]
         heat = events[events.type.eq('폭염')][columns]
-        parts.append(heat.assign(scenario=name, max_gap_days=gap, scenario_observation_days=days))
+        parts.append(heat.assign(scenario=name, max_gap_days=gap, nominal_observation_days=days))
     return pd.concat(parts, ignore_index=True)
 
 
