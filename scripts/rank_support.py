@@ -96,7 +96,7 @@ def industry_metrics(industry, events, threshold=.95, consecutive=3,
                         'observation_holiday_days': int(obs.is_holiday.eq(True).sum()),
                         'observation_nonholiday_unavailable_days': int((~obs.is_holiday.eq(True) & obs.ratio.isna()).sum()),
                         'calendar_provenance': calendar_provenance,
-                        'recovery_uncertainty_note': f'{ev.analysis_role}; effective window; all input age groups required; calendar={calendar_provenance}; holiday_policy=break; provisional recovery rule'})
+                        'recovery_uncertainty_note': f'{ev.analysis_role}; effective window; all input age groups required; calendar={calendar_provenance}; holiday_policy=break; analysis definition, not policy validation'})
     return pd.DataFrame(records)
 
 
@@ -249,7 +249,8 @@ def run(daily_path, events_path, output, run_metadata=None):
     detail = write_support_review(base, scenarios, output)
     write_comparison(detail, daily, output)
     pd.DataFrame(changes, columns=['event_id', 'scope', 'decline_higher_industry', 'priority_higher_industry', 'reason']).to_csv(output/'rank_reversals.csv', index=False, encoding='utf-8-sig')
-    rules = {'version': '1007-support-review-v3', 'status': 'Team provisional direction reported; final adoption pending sensitivity review',
+    rules = {'version': '1007-support-review-v4', 'status': 'Study criteria adopted 2026-10-06; policy proposals remain unvalidated',
+             'criteria_record': 'docs/team_criteria_review_1005.md',
              'input_sha256': {'daily': hashlib.sha256(daily_path.read_bytes()).hexdigest(),
                               'events': hashlib.sha256(events_path.read_bytes()).hexdigest()},
              'comparison_groups': ['event_id', 'scope'], 'main_scope': 'primary (18 predefined industries)',

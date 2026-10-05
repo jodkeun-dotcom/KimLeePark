@@ -40,8 +40,8 @@ def comparison_fields(detail):
         np.where(positions.eq(1), 'single_calendar_run', 'multiple_calendar_runs'))
     out['censored_short_window'] = out.recovery_status.eq('censored') & positions.le(1)
     out['observation_constraint_note'] = np.where(positions.le(1),
-        '관찰기간 제약: 달력상 연속 회복 시작 기회가 최대 1회; 실제 장기 미회복으로 단정하지 않음',
-        '여러 달력상 시작 기회가 있어도 결측·공휴일 영향과 관찰 종료 이후 회복은 미확정')
+        '관찰기간 제약: 달력상 연속 회복 시작 기회가 최대 1회; 실제 유효 기회는 공휴일·결측에 따라 달라짐',
+        '달력상 여러 시작 기회가 있음; 실제 유효 기회는 공휴일·결측에 따라 달라짐')
     return out
 
 
@@ -161,9 +161,13 @@ def plot_comparison(cross, output):
     with plt.rc_context({'font.family': family, 'axes.unicode_minus': False}):
         fig, ax = plt.subplots(figsize=(14, 7))
         matrix.plot.barh(stacked=True, ax=ax, colormap='Set2')
-        ax.invert_yaxis(); ax.set_ylabel(''); ax.set_xlabel('사건×업종 행 수')
+        ax.invert_yaxis()
+        ax.set_ylabel('')
+        ax.set_xlabel('사건×업종 행 수')
         ax.set_title('감소율 순위와 지원 검토 상태 — 순위 우수성·예산 순서 비교 아님')
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left', frameon=False, fontsize=9)
         ax.spines[['top', 'right']].set_visible(False)
-        fig.tight_layout(); fig.savefig(output / 'decline_state_comparison.png', dpi=150); plt.close(fig)
+        fig.tight_layout()
+        fig.savefig(output / 'decline_state_comparison.png', dpi=150)
+        plt.close(fig)
