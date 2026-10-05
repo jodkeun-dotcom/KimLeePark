@@ -1,0 +1,123 @@
+{
+  "version": "kasi-received-xml-calendar-v1",
+  "provider": "한국천문연구원",
+  "source_page": "https://www.data.go.kr/data/15012690/openapi.do",
+  "endpoint": "https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo",
+  "acquisition": "XML files supplied by teammate; not directly retrieved by this script",
+  "queried_date": "2026-10-05",
+  "query_date_status": "teammate_reported_date_only",
+  "request_evidence": "endpoint/year/month reported by teammate; pagination read from response, not an HTTP request log",
+  "empty_response_caveat": "Empty responses do not echo year/month and can have identical hashes; assignment relies on supplied filenames and the teammate account.",
+  "start_date": "2025-07-01",
+  "end_date": "2025-12-31",
+  "calendar_rows": 184,
+  "holiday_dates": 8,
+  "holiday_rule": "isHoliday=Y from received getRestDeInfo records; ordinary weekends are separate",
+  "substitute_rule": "dateName contains 대체공휴일",
+  "calendar_sha256": "58ca2d36b3f128102ad8b219b68bc25495a69159a9fa0587e132161436934ba1",
+  "responses": [
+    {
+      "file": "holiday_2025_07.xml",
+      "sha256": "384cf56e190fbe9ec36f6587e87a06842e3ebed3d7342580738e094bb2d068e6",
+      "bytes": 249,
+      "assigned_year": 2025,
+      "assigned_month": 7,
+      "request_parameters_reported": {
+        "solYear": "2025",
+        "solMonth": "07"
+      },
+      "pagination_in_response": {
+        "total_count": 0,
+        "page_no": 1,
+        "num_of_rows": 100,
+        "month_check": "empty_response_month_not_echoed"
+      }
+    },
+    {
+      "file": "holiday_2025_08.xml",
+      "sha256": "172a36de6757c6d1901979f8f03b9db048167cb6db32b278a668c7ef2e017dd8",
+      "bytes": 385,
+      "assigned_year": 2025,
+      "assigned_month": 8,
+      "request_parameters_reported": {
+        "solYear": "2025",
+        "solMonth": "08"
+      },
+      "pagination_in_response": {
+        "total_count": 1,
+        "page_no": 1,
+        "num_of_rows": 100,
+        "month_check": "item_dates_match"
+      }
+    },
+    {
+      "file": "holiday_2025_09.xml",
+      "sha256": "384cf56e190fbe9ec36f6587e87a06842e3ebed3d7342580738e094bb2d068e6",
+      "bytes": 249,
+      "assigned_year": 2025,
+      "assigned_month": 9,
+      "request_parameters_reported": {
+        "solYear": "2025",
+        "solMonth": "09"
+      },
+      "pagination_in_response": {
+        "total_count": 0,
+        "page_no": 1,
+        "num_of_rows": 100,
+        "month_check": "empty_response_month_not_echoed"
+      }
+    },
+    {
+      "file": "holiday_2025_10.xml",
+      "sha256": "e99d5deb08c620996687faa38469ed04aa218d5d21ef863b150b0028a2809bd3",
+      "bytes": 1027,
+      "assigned_year": 2025,
+      "assigned_month": 10,
+      "request_parameters_reported": {
+        "solYear": "2025",
+        "solMonth": "10"
+      },
+      "pagination_in_response": {
+        "total_count": 6,
+        "page_no": 1,
+        "num_of_rows": 100,
+        "month_check": "item_dates_match"
+      }
+    },
+    {
+      "file": "holiday_2025_11.xml",
+      "sha256": "384cf56e190fbe9ec36f6587e87a06842e3ebed3d7342580738e094bb2d068e6",
+      "bytes": 249,
+      "assigned_year": 2025,
+      "assigned_month": 11,
+      "request_parameters_reported": {
+        "solYear": "2025",
+        "solMonth": "11"
+      },
+      "pagination_in_response": {
+        "total_count": 0,
+        "page_no": 1,
+        "num_of_rows": 100,
+        "month_check": "empty_response_month_not_echoed"
+      }
+    },
+    {
+      "file": "holiday_2025_12.xml",
+      "sha256": "83a86f5c47922a67dbbf3ca32a2be8f858b182f1184e2a5c302dd1492f2711f6",
+      "bytes": 391,
+      "assigned_year": 2025,
+      "assigned_month": 12,
+      "request_parameters_reported": {
+        "solYear": "2025",
+        "solMonth": "12"
+      },
+      "pagination_in_response": {
+        "total_count": 1,
+        "page_no": 1,
+        "num_of_rows": 100,
+        "month_check": "item_dates_match"
+      }
+    }
+  ],
+  "calendar_generated_at_utc": "2026-10-05T10:08:26.076126+00:00"
+}
