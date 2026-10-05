@@ -85,11 +85,21 @@ def compare_common(priority, recovery, sales):
             'method_approval': False}
 
 
-def run(card, events, windows, output, calendar=None):
+def run(card, events, windows, output, calendar=None, calendar_metadata=None):
     output = output.resolve()
     if output.exists() and any(output.iterdir()):
         raise ValueError('use a new output directory; previous runs must be preserved')
     inputs = {'card': Path(card), 'events': Path(events), 'windows': Path(windows)}
+    calendar_record = None
+    if calendar_metadata is not None:
+        if calendar is None:
+            raise ValueError('calendar metadata requires a calendar')
+        calendar_record = json.loads(calendar_metadata.read_text(encoding='utf-8-sig'))
+        if calendar_record.get('version') != 'kasi-received-xml-calendar-v1':
+            raise ValueError('unsupported calendar metadata')
+        if calendar_record.get('calendar_sha256') != hashlib.sha256(calendar.read_bytes()).hexdigest():
+            raise ValueError('calendar differs from provenance record')
+        inputs['calendar_metadata'] = Path(calendar_metadata)
     if calendar is not None:
         inputs['calendar'] = Path(calendar)
         baseline.calendar_flags(pd.date_range('2025-07-01', '2025-12-31'), calendar)
@@ -100,8 +110,9 @@ def run(card, events, windows, output, calendar=None):
     output.mkdir(parents=True, exist_ok=True)
     frozen = output / 'inputs'
     frozen.mkdir()
+    frozen_names = {name: f'{name}.json' if name == 'calendar_metadata' else f'{name}.csv' for name in inputs}
     for name, path in inputs.items():
-        target = frozen / f'{name}.csv'
+        target = frozen / frozen_names[name]
         shutil.copyfile(path, target)
         if file_record(target) != records[name]:
             raise ValueError('input changed during snapshot')
@@ -109,6 +120,8 @@ def run(card, events, windows, output, calendar=None):
     manifest = {'version': 'support-review-v1', 'status': 'running', 'started_at_utc': stamp(),
                 'calendar_status': 'supplied_calendar_api_evidence_not_verified' if calendar else 'provisional_2025_08_15_only',
                 'calendar_api_retrieved_at': None,
+                'calendar_source_record': calendar_record,
+                'calendar_api_retrieved_date': calendar_record.get('queried_date') if calendar_record else None,
                 'note': 'This is an analysis run time, not the original/API query time. No policy approval.',
                 'inputs': records, 'source_sha256': sources,
                 'environment': {'python': sys.version.split()[0], **{name: importlib.metadata.version(name)
@@ -159,7 +172,7 @@ def run(card, events, windows, output, calendar=None):
                   pd.read_csv(output / 'common_recovery/recovery_metrics_common_baseline.csv'),
                   pd.read_csv(output / 'common_sales/sales_handoff_diagnostics.csv'))
         for name, record in records.items():
-            if file_record(frozen / f'{name}.csv') != record:
+            if file_record(frozen / frozen_names[name]) != record:
                 raise ValueError('frozen input changed during run')
         if any(hashlib.sha256((root / name).read_bytes()).hexdigest() != sha for name, sha in sources.items()):
             raise ValueError('analysis source changed during run')
@@ -180,5 +193,6 @@ if __name__ == '__main__':
     for name in ['card', 'events', 'windows', 'output']:
         parser.add_argument(f'--{name}', type=Path, required=True)
     parser.add_argument('--calendar', type=Path)
+    parser.add_argument('--calendar-metadata', type=Path, help='Received-XML source record; calendar hash must match')
     args = parser.parse_args()
-    run(args.card, args.events, args.windows, args.output, args.calendar)
+    run(args.card, args.events, args.windows, args.output, args.calendar, args.calendar_metadata)
