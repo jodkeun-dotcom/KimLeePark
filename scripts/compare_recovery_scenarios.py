@@ -21,7 +21,7 @@ import compute_recovery_from_baseline as common
 import prepare_sales_handoff as sales
 
 STATUSES = ['no_decline', 'recovered', 'censored', 'insufficient_data']
-STATUS_KO = {'no_decline': '감소 없음', 'recovered': '회복', 'censored': '관찰기간 내 회복 미확인',
+STATUS_KO = {'no_decline': '사건 감소 기준 미충족', 'recovered': '회복', 'censored': '관찰기간 내 회복 미확인',
              'insufficient_data': '자료 부족'}
 # 같은 단위 대응 키: 사건 정의(시작·종료일)가 같은 업종×연령. 관찰 끝(window_end)은 시나리오가 바꾸는 값이라 제외한다.
 UNIT = ['event_id', 'region', 'industry', 'age', 'window_start', 'event_end']
@@ -65,7 +65,9 @@ def recovery_grid(inputs, scenarios, thresholds, runs):
         for threshold in thresholds:
             for run in runs:
                 _, metrics = common.compute(predictions, industry, events, threshold, run, metadata)
-                metrics = metrics.assign(scenario=name, max_gap_days=gap, observation_days=days,
+                # observation_days = compute가 센 실제(절단 후) 관찰일수. 덮어쓰지 않는다.
+                # nominal_observation_days = 시나리오 설정값(명목 관찰기간 길이).
+                metrics = metrics.assign(scenario=name, max_gap_days=gap, nominal_observation_days=days,
                                          threshold=threshold, consecutive_days=run)
                 parts.append(metrics)
     if not parts:
@@ -151,9 +153,9 @@ def shortfall_by_scenario(inputs, scenarios):
         predictions, _, events, metadata = inputs[name]
         _, diagnostic = sales.build(predictions, events, metadata)
         ends = events.set_index('event_id').end_date
-        diagnostic = diagnostic.assign(scenario=name, max_gap_days=gap, observation_days=days,
+        diagnostic = diagnostic.assign(scenario=name, max_gap_days=gap, nominal_observation_days=days,
                                        event_end=diagnostic.event_id.map(ends))
-        parts.append(diagnostic[UNIT + ['scenario', 'max_gap_days', 'observation_days', 'window_end',
+        parts.append(diagnostic[UNIT + ['scenario', 'max_gap_days', 'nominal_observation_days', 'window_end',
                                         'net_shortfall_nonholiday', 'net_rate_nonholiday']])
     if not parts:
         raise ValueError('no scenarios for shortfall comparison')
@@ -199,6 +201,38 @@ def recovery_vs_shortfall(grid, shortfall, reference):
             .unstack('net_class', fill_value=0).reset_index())
 
 
+def unit_changes(grid, reference):
+    """단위별 설정 간 상태 변화 내역 (넓은 형식). 열 이름은 '시나리오|임계|연속일수'."""
+    label = (grid.scenario + '|' + grid.threshold.map('{:.2f}'.format) + '|'
+             + grid.consecutive_days.astype(str))
+    keyed = grid.assign(setting=label)
+    wide = keyed.pivot_table(index=UNIT + ['scope'], columns='setting', values='recovery_status', aggfunc='first')
+    ref = select(grid, reference).set_index(UNIT + ['scope'])
+    out = pd.DataFrame(index=wide.index)
+    out['reference_status'] = ref.recovery_status.reindex(wide.index)
+    out['reference_recovery_days'] = ref.recovery_days.reindex(wide.index)
+    out['settings'] = wide.notna().sum(axis=1)
+    out['distinct_statuses'] = wide.nunique(axis=1)
+    # 기준 상태가 없는 단위(병합 사건 등)는 비교 불가: 차이 횟수를 0이 아니라 공란으로 둔다.
+    out['has_reference'] = out.reference_status.notna()
+    differing = wide.ne(out.reference_status, axis=0).where(wide.notna()).sum(axis=1)
+    out['settings_differing_from_reference'] = differing.where(out.has_reference).astype('Int64')
+    out['statuses_seen'] = wide.apply(lambda row: ', '.join(sorted(set(row.dropna()))), axis=1)
+    return out.join(wide).reset_index()
+
+
+def event_windows_by_scenario(inputs, scenarios):
+    """시나리오별 폭염 사건의 실제 관찰기간 (공개 기상자료 기반)."""
+    parts = []
+    columns = ['event_id', 'start_date', 'end_date', 'observation_end', 'observation_end_effective',
+               'observation_days_effective', 'observation_cut_by', 'baseline_days_effective', 'analysis_role']
+    for name, gap, days in scenarios:
+        events = inputs[name][2]
+        heat = events[events.type.eq('폭염')][columns]
+        parts.append(heat.assign(scenario=name, max_gap_days=gap, nominal_observation_days=days))
+    return pd.concat(parts, ignore_index=True)
+
+
 def select(grid, setting):
     scenario, threshold, run = setting
     return grid[grid.scenario.eq(scenario) & grid.threshold.eq(threshold) & grid.consecutive_days.eq(run)]
@@ -229,17 +263,24 @@ def summary_markdown(distribution, changes, transitions, stable, days, unmatched
     return '\n'.join(parts)
 
 
-def main():
+DEFAULT_ROOT = Path('outputs/seeun_1005to1007')   # docs/recovery_sensitivity_1007.md의 재현 명령과 같은 경로
+
+
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--scenario-root', type=Path, default=Path('outputs/seeun_1005to1007/scenarios'))
+    parser.add_argument('--scenario-root', type=Path, default=DEFAULT_ROOT / 'scenarios')
     parser.add_argument('--scenarios', nargs='+',
                         default=['S0:2:14', 'S1:2:7', 'S2:2:21', 'S3:3:14', 'S4:3:21'],
                         help='NAME:GAP:DAYS, 폴더 이름 = NAME')
     parser.add_argument('--thresholds', nargs='+', type=float, default=[0.90, 0.95, 1.00])
     parser.add_argument('--runs', nargs='+', type=int, default=[2, 3, 4])
     parser.add_argument('--reference', nargs=3, default=['S0', '0.95', '3'], metavar=('SCENARIO', 'THRESHOLD', 'RUN'))
-    parser.add_argument('--output', type=Path, default=Path('outputs/seeun_1005to1007'))
-    args = parser.parse_args()
+    parser.add_argument('--output', type=Path, default=DEFAULT_ROOT)
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
     scenarios = [parse_scenario(s) for s in args.scenarios]
     reference = (args.reference[0], float(args.reference[1]), int(args.reference[2]))
     inputs = {name: load_scenario(args.scenario_root / name) for name, _, _ in scenarios}
@@ -251,6 +292,8 @@ def main():
     shortfall = shortfall_by_scenario(inputs, scenarios)
     shortfall_changes = shortfall_against_reference(shortfall, reference[0])
     recovery_net = recovery_vs_shortfall(grid, shortfall, reference)
+    per_unit = unit_changes(grid, reference)
+    windows = event_windows_by_scenario(inputs, scenarios)
     out = args.output
     out.mkdir(parents=True, exist_ok=True)
     grid.to_csv(out / 'recovery_grid_metrics_PRIVATE_REVIEW_ONLY.csv', index=False, encoding='utf-8-sig')
@@ -263,6 +306,8 @@ def main():
     shortfall.to_csv(out / 'shortfall_by_scenario_PRIVATE_REVIEW_ONLY.csv', index=False, encoding='utf-8-sig')
     shortfall_changes.to_csv(out / 'shortfall_changes.csv', index=False, encoding='utf-8-sig')
     recovery_net.to_csv(out / 'recovery_vs_shortfall.csv', index=False, encoding='utf-8-sig')
+    per_unit.to_csv(out / 'unit_status_changes_PRIVATE_REVIEW_ONLY.csv', index=False, encoding='utf-8-sig')
+    windows.to_csv(out / 'scenario_event_windows.csv', index=False, encoding='utf-8-sig')
     (out / 'sensitivity_summary.md').write_text(
         summary_markdown(distribution, changes, transitions, stable, days, unmatched, reference, shortfall_changes,
                          recovery_net), encoding='utf-8')
