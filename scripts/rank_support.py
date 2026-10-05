@@ -16,6 +16,7 @@ import pandas as pd
 from scripts import prepare_sales_baseline as baseline
 from scripts.compute_recovery import PRIMARY_INDUSTRIES, recovery_day
 from scripts.support_actions import ACTION_RULES, write_support_review
+from scripts.compare_decline_states import write_comparison
 
 
 def paired_industry(daily, model):
@@ -245,9 +246,10 @@ def run(daily_path, events_path, output, run_metadata=None):
     output.mkdir(parents=True, exist_ok=True)
     base.to_csv(output/'support_priority_PROVISIONAL.csv', index=False, encoding='utf-8-sig')
     scenarios.to_csv(output/'priority_sensitivity.csv', index=False, encoding='utf-8-sig')
-    write_support_review(base, scenarios, output)
+    detail = write_support_review(base, scenarios, output)
+    write_comparison(detail, daily, output)
     pd.DataFrame(changes, columns=['event_id', 'scope', 'decline_higher_industry', 'priority_higher_industry', 'reason']).to_csv(output/'rank_reversals.csv', index=False, encoding='utf-8-sig')
-    rules = {'version': '1007-support-review-v2', 'status': 'Joeun requested this analysis direction; joint interpretation review pending',
+    rules = {'version': '1007-support-review-v3', 'status': 'Team provisional direction reported; final adoption pending sensitivity review',
              'input_sha256': {'daily': hashlib.sha256(daily_path.read_bytes()).hexdigest(),
                               'events': hashlib.sha256(events_path.read_bytes()).hexdigest()},
              'comparison_groups': ['event_id', 'scope'], 'main_scope': 'primary (18 predefined industries)',
@@ -260,6 +262,9 @@ def run(daily_path, events_path, output, run_metadata=None):
              'sensitivity': {'baseline': ['mean', 'median'], 'threshold': [.9, .95, 1.0], 'consecutive_days': [2, 3, 4]},
              'rank_reversals': len(changes), 'calendar_status': provenance,
              'holiday_policy': 'break consecutive recovery; exclude from monetary eligible window',
+             'decline_comparison': {'cohort': 'all finite event declines within event/region/scope',
+                                    'ties': 'minimum rank; top 3 includes all ties; descriptive display only',
+                                    'not_equivalent_to': 'decline_only_rank on the smaller Pareto cohort'},
              'support_review': {'category_order': 'none; not funding ranks', 'rules': ACTION_RULES,
                                 'timing': 'retrospective assessment at window_end; not an early-warning backtest',
                                 'duration': 'not estimated; reassess when additional observations arrive',

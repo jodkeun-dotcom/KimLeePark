@@ -8,6 +8,7 @@ import pandas as pd
 
 from scripts.prepare_priority import KEY
 from scripts.prepare_sales_baseline import bool_column
+from scripts.compare_decline_states import comparison_fields
 
 
 ACTION_RULES = {
@@ -101,7 +102,7 @@ def add_support_actions(metrics):
 
 
 def write_support_review(base, scenarios, output):
-    detail = add_support_actions(base)
+    detail = comparison_fields(add_support_actions(base))
     sensitive = add_support_actions(scenarios)
     summary = detail.groupby(['event_id', 'scope', 'support_review_group', 'support_review_label'], sort=True).size().rename('industry_event_rows').reset_index()
     detail.to_csv(output / 'support_review_PROVISIONAL.csv', index=False, encoding='utf-8-sig')
@@ -109,6 +110,7 @@ def write_support_review(base, scenarios, output):
     sensitive[KEY + ['scope', 'scenario', 'support_review_group', 'support_review_label']].to_csv(
         output / 'support_review_sensitivity.csv', index=False, encoding='utf-8-sig')
     plot_support_review(detail, output)
+    return detail
 
 
 def plot_support_review(detail, output):
