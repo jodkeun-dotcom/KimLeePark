@@ -78,7 +78,7 @@ def compute(predictions, industry, events, threshold=0.95, run=3, run_metadata=N
         else:
             status, day, date = recovery.recovery_day(obs, threshold=threshold, run=run)
         role = g.analysis_role.iloc[0]
-        note = f'source=PR29;fixed_pre_event;weekday_mean;exclude_missing;effective;calendar={provenance};provisional_recovery_rule;analysis_role={role};complete_group_policy_review_pending'
+        note = f'source=PR29;fixed_pre_event;weekday_mean;exclude_missing;effective;calendar={provenance};provisional_recovery_rule;recovery_threshold={threshold};consecutive_days={run};holiday_policy=break;analysis_role={role};complete_group_policy_review_pending'
         if key[3] == 'ALL':
             note += f';all_input_age_groups_required;partial_group_dates={int((~g.complete_group_coverage).sum())};partial_ratio_exploratory_only'
         row = dict(zip(sales.KEY, key))

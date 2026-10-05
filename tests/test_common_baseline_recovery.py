@@ -21,6 +21,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(curves.loc[curves.age.eq('20대'),'amount'].tolist(),[0,0])
         sales,_=h.build(d,e);joined=p.join_metrics(sales,r.handoff(metrics))
         self.assertEqual(len(joined),3);self.assertTrue(joined.support_priority.isna().all())
+        self.assertTrue(joined.recovery_uncertainty_note.str.contains('recovery_threshold=0.95;consecutive_days=1').all())
     def test_mismatched_values_or_keys_rejected(self):
         d,i,e=self.data();i.loc[0,'prediction_paired']+=1
         with self.assertRaises(ValueError):c.compute(d,i,e)

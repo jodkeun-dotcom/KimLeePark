@@ -28,6 +28,9 @@ python -m unittest discover -s tests -p test_sales_handoff.py -v
 python -m unittest discover -s tests -p test_common_baseline_recovery.py -v
 python scripts/compare_recovery_definitions.py --curves outputs/common_recovery/recovery_curves_common_baseline.csv --legacy-handoff outputs/legacy_recovery/recovery_handoff.csv --threshold 0.95 --consecutive-days 3 --output outputs/recovery_sensitivity_review
 python -m unittest discover -s tests -p test_recovery_sensitivity.py -v
+python scripts/compare_recovery_definitions.py --curves outputs/common_recovery/recovery_curves_common_baseline.csv --legacy-handoff outputs/legacy_recovery/recovery_handoff.csv --scope age_details --output outputs/recovery_sensitivity_review
+python scripts/diagnose_recovery_coverage.py --curves outputs/common_recovery/recovery_curves_common_baseline.csv --metrics outputs/common_recovery/recovery_metrics_common_baseline.csv --output outputs/recovery_sensitivity_review
+python -m unittest discover -s tests -p test_recovery_coverage.py -v
 ```
 
 순위는 생성하지 않으며 공동 규칙 검토 대기 상태를 유지합니다. 같은 키로 연결됐다는 사실이 통합 결과의 타당성 승인을 뜻하지 않습니다.
@@ -39,6 +42,10 @@ python -m unittest discover -s tests -p test_recovery_sensitivity.py -v
 민감도 실행의 --legacy-handoff는 같은 사건·유효 기간 및 95%·3일 연속으로 만든 기존 #30 전달본이어야 합니다. legacy 전달본에는 기준 옵션 열이 없어 실행 기록과 원본 코드로 별도 확인해야 합니다. 새 곡선에는 사용한 threshold·consecutive_days와 검증된 is_holiday가 포함되며 비교 옵션과 다르면 거부합니다. 민감도 CSV는 REVIEW_ONLY로 명명하고 전달표를 만들지 않습니다. 실제 CSV·개별 업종 결과는 로컬에만 보관합니다.
 
 세은 추가 확인의 전체·사건별 분포와 8/15 민감도는 [recovery_sensitivity_review.md](recovery_sensitivity_review.md)에 정리했습니다. 완전 그룹 기준의 판정 불가 증가를 확인했으며, 고정 연령 구성·공휴일 건너뜀을 기본 규칙으로 자동 채택하지 않습니다.
+
+2차 확인의 예상 매출 비중·결측 원인·한 연령 제외 건수와 연령별 공휴일 비교는 [recovery_coverage_followup.md](recovery_coverage_followup.md)에 정리했습니다. 예상 비중의 분모는 실제 관측과 관계없이 존재하는 연령별 예상값 전부이며, 예상 부재 셀을 포함한 참 전체 매출로 해석하지 않습니다. coverage_causes_PRIVATE_REVIEW_ONLY.csv에는 개별 업종과 알려진 예상 합이 포함되어 로컬·팀 비공개 경로에서만 관리합니다. 공개 문서는 비중과 건수만 담습니다.
+
+회복 전달본의 recovery_uncertainty_note에 recovery_threshold·consecutive_days·holiday_policy가 남습니다. 현재 결합 코드는 note를 보존하지만 기준값을 자동 검증하지 않으므로 실행 기록을 대조해야 합니다. 기준이 다른 전달본을 같은 키로 섞지 않습니다. 관련 테스트는 30개이며 새 진단의 기본 회복 규칙은 변경하지 않습니다.
 
 ## 매출 전달표의 정의
 

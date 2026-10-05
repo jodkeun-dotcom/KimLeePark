@@ -1,4 +1,4 @@
-"""Review-only ALL recovery comparisons; never emits a priority handoff."""
+"""Review-only ALL or age-detail comparisons; never emits a priority handoff."""
 import argparse
 from pathlib import Path
 
@@ -18,7 +18,7 @@ PROFILES = [
 ]
 
 
-def compare(curves, legacy, threshold=.95, run=3):
+def compare(curves, legacy, threshold=.95, run=3, scope='ALL'):
     if not np.isfinite(threshold) or threshold <= 0 or isinstance(run, bool) or not isinstance(run, int) or run < 1:
         raise ValueError('invalid recovery rule')
     required = KEY + ['date', 'window', 'day_offset', 'amount', 'prediction',
@@ -27,10 +27,14 @@ def compare(curves, legacy, threshold=.95, run=3):
         raise ValueError(f'curve columns missing: {sorted(missing)}')
     if missing := set(KEY + ['recovery_status', 'recovery_days']) - set(legacy):
         raise ValueError(f'legacy columns missing: {sorted(missing)}')
-    d = curves.loc[curves.age.eq('ALL')].copy()
-    old = legacy.loc[legacy.age.eq('ALL')].copy()
+    if scope not in ['ALL', 'age_details']:
+        raise ValueError('invalid comparison scope')
+    selected = curves.age.eq('ALL') if scope == 'ALL' else ~curves.age.eq('ALL')
+    old_selected = legacy.age.eq('ALL') if scope == 'ALL' else ~legacy.age.eq('ALL')
+    d = curves.loc[selected].copy()
+    old = legacy.loc[old_selected].copy()
     if d.empty or old.empty:
-        raise ValueError('no ALL rows')
+        raise ValueError('no rows for selected scope')
     for frame in [d, old]:
         if frame[KEY].isna().any().any():
             raise ValueError('missing keys')
@@ -53,7 +57,7 @@ def compare(curves, legacy, threshold=.95, run=3):
         raise ValueError('unknown legacy status')
     membership = d[KEY].drop_duplicates().merge(old[KEY], on=KEY, how='outer', indicator=True)
     if not membership._merge.eq('both').all():
-        raise ValueError('legacy and common ALL keys/windows differ')
+        raise ValueError('legacy and common keys/windows differ')
     # Legacy handoff omits rule metadata: caller must verify threshold/run provenance.
     records = []
     for key, g in d.groupby(KEY):
@@ -97,7 +101,7 @@ def compare(curves, legacy, threshold=.95, run=3):
             records.append(row)
     results = pd.DataFrame(records)
     legacy_rows = old[KEY + ['recovery_status', 'recovery_days']].copy()
-    legacy_rows['profile'] = 'legacy30_separate_ALL'
+    legacy_rows['profile'] = 'legacy30_separate_ALL' if scope == 'ALL' else 'legacy30_age_details'
     legacy_rows['recovery_uncertainty_note'] = 'comparison_only;legacy_rule_provenance_must_match;not_for_priority'
     results = pd.concat([results, legacy_rows], ignore_index=True)
     summary = results.groupby(['event_id', 'profile']).recovery_status.value_counts().unstack(fill_value=0)
@@ -113,11 +117,13 @@ def main():
     parser.add_argument('--threshold', type=float, default=.95)
     parser.add_argument('--consecutive-days', type=int, default=3)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--scope', choices=['ALL', 'age_details'], default='ALL')
     args = parser.parse_args()
-    detail, summary = compare(pd.read_csv(args.curves, low_memory=False), pd.read_csv(args.legacy_handoff), args.threshold, args.consecutive_days)
+    detail, summary = compare(pd.read_csv(args.curves, low_memory=False), pd.read_csv(args.legacy_handoff), args.threshold, args.consecutive_days, args.scope)
     args.output.mkdir(parents=True, exist_ok=True)
-    detail.to_csv(args.output / 'ALL_recovery_sensitivity_REVIEW_ONLY.csv', index=False, encoding='utf-8-sig')
-    summary.to_csv(args.output / 'ALL_status_distribution_REVIEW_ONLY.csv', index=False, encoding='utf-8-sig')
+    prefix = 'ALL' if args.scope == 'ALL' else 'AGE'
+    detail.to_csv(args.output / f'{prefix}_recovery_sensitivity_REVIEW_ONLY.csv', index=False, encoding='utf-8-sig')
+    summary.to_csv(args.output / f'{prefix}_status_distribution_REVIEW_ONLY.csv', index=False, encoding='utf-8-sig')
     print(summary.to_string(index=False))
 
 

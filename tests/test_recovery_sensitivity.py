@@ -27,6 +27,15 @@ def fixture():
 
 
 class Tests(unittest.TestCase):
+    def test_age_details_scope_uses_age_keys(self):
+        curves,legacy=fixture()
+        age_curves=curves.assign(age='20')
+        age_legacy=legacy.assign(age='20')
+        detail,summary=compare(pd.concat([curves,age_curves]),pd.concat([legacy,age_legacy]),scope='age_details')
+        self.assertTrue(detail.age.eq('20').all());self.assertTrue(summary.total.eq(1).all())
+        self.assertIn('legacy30_age_details',detail.profile.tolist())
+        self.assertEqual(detail.set_index('profile').loc['complete_groups_skip_holidays','recovery_status'],'recovered')
+
     def test_holiday_skip_is_review_only_and_preserves_calendar_offset(self):
         curves, legacy = fixture()
         detail, summary = compare(curves, legacy)
