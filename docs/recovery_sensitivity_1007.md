@@ -1,7 +1,7 @@
 # #11 회복 기준·관찰기간·사건 병합 민감도
 
 관련: #11 (← #8). #13 우선순위 표의 순위 안정성 검토는 PR #31 병합 후 추가한다. 상태: **검토용**. 기준값을 확정하지 않으며 지원 순위를 만들지 않는다.
-아래는 건수·비율만 담는다. 업종별 행과 금액은 로컬 `outputs/seeun_1005to1011/`의 `*_PRIVATE_REVIEW_ONLY.csv`에만 있다.
+아래는 건수·비율만 담는다. 업종별 행과 금액은 로컬 `outputs/seeun_1005to1007/`의 `*_PRIVATE_REVIEW_ONLY.csv`에만 있다.
 
 - 회복은 **그날 매출 수준의 회복**이며 누적 부족의 만회가 아니다. 기준선 대비 차이이고 인과적 폭염 피해액이 아니다.
 - 사건이 2~3건뿐이므로 신뢰구간을 만들지 않고 **설정별 결과 범위(최소~최대)** 로 표현한다.
@@ -224,12 +224,12 @@ S0 안에서 회복 기준만 바꾼 경우(8개 설정 합계, 같은 단위가
 for s in "S0 2 14" "S1 2 7" "S2 2 21" "S3 3 14" "S4 3 21"; do
   set -- $s
   python scripts/label_weather_events.py --max-gap-days $2 --observation-days $3 \
-    --output outputs/seeun_1005to1011/scenarios/$1/weather_events \
-    --figure outputs/seeun_1005to1011/scenarios/$1/weather_event_timeline.png
+    --output outputs/seeun_1005to1007/scenarios/$1/weather_events \
+    --figure outputs/seeun_1005to1007/scenarios/$1/weather_event_timeline.png
   python scripts/prepare_sales_baseline.py --daily data/processed/card/daily.csv \
-    --events outputs/seeun_1005to1011/scenarios/$1/weather_events/weather_events.csv \
-    --event-windows outputs/seeun_1005to1011/scenarios/$1/weather_events/weather_event_windows.csv \
-    --output outputs/seeun_1005to1011/scenarios/$1/baseline
+    --events outputs/seeun_1005to1007/scenarios/$1/weather_events/weather_events.csv \
+    --event-windows outputs/seeun_1005to1007/scenarios/$1/weather_events/weather_event_windows.csv \
+    --output outputs/seeun_1005to1007/scenarios/$1/baseline
 done
 python scripts/compare_recovery_scenarios.py   # 기본: S0~S4 × 임계 0.90/0.95/1.00 × 연속 2/3/4일
 ```
