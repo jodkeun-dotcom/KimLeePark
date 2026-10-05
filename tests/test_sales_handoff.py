@@ -11,7 +11,9 @@ def inputs():
     for date in ['2025-08-01','2025-08-02']:
         for age,actual in [('20대',0.),('30대',200.)]:
             rows.append(dict(event_id='E',region='R',industry='A',age=age,window_start='2025-08-01',window_end='2025-08-02',date=date,amount=actual,prediction=100.,window_type='effective',baseline_mode='fixed_pre_event',missing_policy='exclude_missing',model_id='weekday_mean',is_holiday=False))
-    return pd.DataFrame(rows),pd.DataFrame([dict(event_id='E',end_date='2025-08-01')])
+    d=pd.DataFrame(rows)
+    d['phase']=np.where(d.date.eq('2025-08-01'),'event','observation');d['analysis_role']='case_study'
+    return d,pd.DataFrame([dict(event_id='E',start_date='2025-08-01',end_date='2025-08-01',observation_end_effective='2025-08-02',analysis_role='case_study')])
 
 class Checks(unittest.TestCase):
     def test_all_gross_applies_after_age_aggregation(self):
@@ -40,5 +42,27 @@ class Checks(unittest.TestCase):
     def test_missing_grid_rejected(self):
         d,e=inputs()
         with self.assertRaises(ValueError):h.build(d.iloc[1:],e)
+
+    def test_official_window_and_phase_rejected(self):
+        for col,value in [('start_date','2025-07-31'),('observation_end_effective','2025-08-03')]:
+            d,e=inputs();e.loc[0,col]=value
+            with self.assertRaises(ValueError):h.build(d,e)
+        d,e=inputs();d.loc[0,'phase']='observation'
+        with self.assertRaises(ValueError):h.build(d,e)
+
+    def test_role_is_validated_and_reported(self):
+        d,e=inputs();e['analysis_role']='statistical'
+        with self.assertRaises(ValueError):h.build(d,e)
+        d['analysis_role']='statistical';a,_=h.build(d,e)
+        self.assertTrue(a.sales_uncertainty_note.str.contains('analysis_role=statistical').all())
+
+    def test_calendar_provenance_is_not_guessed(self):
+        d,e=inputs();d.loc[d.date.eq('2025-08-02'),'is_holiday']=True;d.loc[d.is_holiday,'prediction']=np.nan
+        a,_=h.build(d,e)
+        self.assertTrue(a.sales_uncertainty_note.str.contains('calendar=unknown_review_required').all())
+        a,_=h.build(d,e,{'calendar_provenance':'provided_calendar'})
+        self.assertTrue(a.sales_uncertainty_note.str.contains('calendar=provided_calendar').all())
+        with self.assertRaises(ValueError):h.build(d,e,{'calendar_provenance':'provisional_2025_08_15_only'})
+        with self.assertRaises(ValueError):h.build(d,e,{'daily_rows':999})
 
 if __name__=='__main__':unittest.main()
