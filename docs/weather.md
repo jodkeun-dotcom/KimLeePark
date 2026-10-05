@@ -102,6 +102,8 @@ python scripts/label_weather_events.py   # 입력 data/processed/weather.csv →
 python scripts/label_weather_events.py   # 입력 data/processed/weather.csv
 ```
 
+민감도 검토(#11)용으로 `--max-gap-days`(기본 2), `--observation-days`(기본 14)를 바꿔 다른 폴더(`--output`)에 사건·창 파일을 만들 수 있다. 기본값 실행 결과는 옵션 추가 전과 같다. 시나리오와 결과는 [회복 민감도](recovery_sensitivity_1007.md)를 참고한다.
+
 공식 기상특보는 춘천 단독 집계가 없어 아래 임계값을 직접 적용한다.
 
 | 유형 | 기준 | flag 열 | event_id |

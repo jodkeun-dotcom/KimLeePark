@@ -1,0 +1,236 @@
+import sys
+import unittest
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
+import compare_recovery_scenarios as sc
+import label_weather_events as lw
+import prepare_sales_baseline as baseline
+from test_sales_handoff import inputs
+
+D = pd.Timestamp
+
+
+def weather(temps, start='2025-07-10'):
+    # 최소습도 50%에서 최고기온 34 → 체감 33.5(폭염), 20 → 비사건
+    n = len(temps)
+    return lw.add_features(pd.DataFrame(dict(
+        date=pd.date_range(start, periods=n), temp_max_c=temps, humidity_min_pct=[50] * n,
+        humidity_avg_pct=[70] * n, precip_mm=[None] * n, new_snow_max_cm=[None] * n)))
+
+
+def heat(events):
+    return events[events.type.eq('폭염')]
+
+
+class EventScenarioTests(unittest.TestCase):
+    def test_default_options_match_module_defaults(self):
+        df = weather([20] * 7 + [34] + [20] * 3 + [34] + [20] * 20)
+        default = lw.group_events(df)
+        explicit = lw.group_events(df, lw.MAX_GAP_DAYS, lw.OBSERVATION_DAYS)
+        pd.testing.assert_frame_equal(default, explicit)
+        pd.testing.assert_frame_equal(lw.event_windows(default), lw.event_windows(explicit))
+
+    def test_gap_three_merges_events(self):
+        # 7/17, 7/21 폭염: 사이 비사건일 3일 → 기본(2일)은 두 사건, 3일이면 한 사건 7/17~7/21
+        df = weather([20] * 7 + [34] + [20] * 3 + [34] + [20] * 20)
+        self.assertEqual(heat(lw.group_events(df)).event_id.tolist(), ['HEAT01', 'HEAT02'])
+        merged = heat(lw.group_events(df, max_gap_days=3))
+        self.assertEqual(len(merged), 1)
+        merged = merged.iloc[0]
+        self.assertEqual((merged.event_id, merged.start_date, merged.end_date, merged.event_days),
+                         ('HEAT01', D('2025-07-17'), D('2025-07-21'), 2))
+
+    def test_observation_length_and_cut(self):
+        # 7/17 폭염 하나: 관찰 7일이면 7/18~7/24, 21일이면 7/18~8/7. 다음 사건이 있으면 길이와 관계없이 그 전날 절단
+        single = weather([20] * 7 + [34] + [20] * 30)
+        for days in [7, 21]:
+            ev = lw.group_events(single, observation_days=days).set_index('event_id').loc['HEAT01']
+            self.assertEqual(ev.observation_end, D('2025-07-17') + pd.Timedelta(days=days))
+            self.assertEqual(ev.observation_days_effective, days)
+            obs = lw.event_windows(lw.group_events(single, observation_days=days)).query(
+                "event_id == 'HEAT01' and window == 'observation'")
+            self.assertEqual(len(obs), days)
+        two = weather([20] * 7 + [34] + [20] * 3 + [34] + [20] * 30)
+        for days in [7, 14, 21]:
+            ev = lw.group_events(two, observation_days=days).set_index('event_id').loc['HEAT01']
+            self.assertEqual((ev.observation_end_effective, ev.observation_days_effective), (D('2025-07-20'), 3))
+
+    def test_default_paths_match_documented_folder(self):
+        # 문서의 재현 명령이 만드는 폴더를 무인자 실행이 그대로 읽고 쓴다 (예전 seeun_1005to1011 폴더는 읽지 않음)
+        args = sc.build_parser().parse_args([])
+        self.assertEqual(args.scenario_root, Path('outputs/seeun_1005to1007/scenarios'))
+        self.assertEqual(args.output, Path('outputs/seeun_1005to1007'))
+        doc = (Path(__file__).parents[1] / 'docs' / 'recovery_sensitivity_1007.md').read_text(encoding='utf-8')
+        self.assertIn('--output outputs/seeun_1005to1007/scenarios/$1/baseline', doc)
+        self.assertNotIn('seeun_1005to1011', doc)
+
+    def test_missing_scenario_inputs_fail_with_paths(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, 'scenario inputs missing: .*weather_events.csv'):
+                sc.load_scenario(Path(tmp) / 'S0')
+
+    def test_invalid_scenario_values_rejected(self):
+        df = weather([20, 34, 20])
+        with self.assertRaises(ValueError):
+            lw.group_events(df, max_gap_days=-1)
+        with self.assertRaises(ValueError):
+            lw.group_events(df, observation_days=0)
+        with self.assertRaises(ValueError):
+            sc.parse_scenario('S0:2')
+
+
+def unit(event, industry, age, status, days=None, scenario='S0', threshold=0.95, run=3, event_end='2025-08-03'):
+    return dict(event_id=event, region='R', industry=industry, age=age, window_start='2025-08-01',
+                event_end=event_end, scenario=scenario, threshold=threshold, consecutive_days=run,
+                recovery_status=status, recovery_days=days, scope='ALL' if age == 'ALL' else 'age')
+
+
+class ComparisonTests(unittest.TestCase):
+    def grid(self):
+        rows = [
+            unit('E1', 'A', 'ALL', 'censored'), unit('E1', 'B', 'ALL', 'no_decline'), unit('E1', 'A', '20대', 'recovered', 2),
+            unit('E1', 'A', 'ALL', 'recovered', 5, run=2), unit('E1', 'B', 'ALL', 'no_decline', run=2),
+            unit('E1', 'A', '20대', 'recovered', 1, run=2),
+            # S3: 사건 종료일이 달라진 병합 사건은 같은 단위로 대응되지 않는다
+            unit('E1', 'A', 'ALL', 'insufficient_data', scenario='S3', event_end='2025-08-07'),
+        ]
+        return pd.DataFrame(rows)
+
+    def test_status_changes_against_reference(self):
+        changes, transitions, unmatched = sc.against_reference(self.grid(), ('S0', 0.95, 3))
+        run2 = changes[(changes.consecutive_days == 2) & (changes.scope == 'ALL')].iloc[0]
+        self.assertEqual((run2.matched, run2.changed), (2, 1))
+        moved = transitions.iloc[0]
+        self.assertEqual((moved.reference_status, moved.recovery_status, moved['count']), ('censored', 'recovered', 1))
+        self.assertEqual(unmatched.scenario.tolist(), ['S3'])
+        reference = changes[(changes.consecutive_days == 3) & (changes.scenario == 'S0')]
+        self.assertTrue(reference.changed.eq(0).all())
+
+    def test_stability_and_distribution(self):
+        grid = self.grid()
+        stable = sc.stability(grid, ('S0', 0.95, 3)).set_index(['comparison', 'unit_set', 'scope'])
+        self.assertEqual(stable.loc[('criteria_only', 'all', 'ALL'), 'stable_units'], 1)
+        self.assertEqual(stable.loc[('criteria_only', 'all', 'ALL'), 'units'], 2)
+        self.assertEqual(stable.loc[('criteria_only', 'all', 'age'), 'stable_share'], 1.0)
+        # 자료 부족이 아닌 기준 단위만 따로 센다
+        self.assertEqual(stable.loc[('criteria_only', 'judgeable', 'ALL'), 'units'], 2)
+        dist = sc.status_distribution(grid).set_index(sc.SETTING + ['scope'])
+        self.assertEqual(dist.loc[('S0', 0.95, 3, 'ALL'), ['censored', 'no_decline', 'total']].tolist(), [1, 1, 2])
+
+    def test_unit_changes_lists_settings(self):
+        out = sc.unit_changes(self.grid(), ('S0', 0.95, 3)).set_index(['industry', 'age', 'event_end'])
+        a = out.loc[('A', 'ALL', '2025-08-03')]
+        self.assertEqual((a.reference_status, a.settings, a.distinct_statuses), ('censored', 2, 2))
+        self.assertEqual(a.settings_differing_from_reference, 1)
+        self.assertEqual(a['S0|0.95|2'], 'recovered')
+        self.assertEqual(out.loc[('B', 'ALL', '2025-08-03'), 'settings_differing_from_reference'], 0)
+        # 병합 사건(종료일이 다름)은 기준 상태가 없고 S3 설정에만 나타난다
+        merged = out.loc[('A', 'ALL', '2025-08-07')]
+        self.assertTrue(pd.isna(merged.reference_status))
+        self.assertEqual(merged['S3|0.95|3'], 'insufficient_data')
+        # 기준이 없으면 비교 불가: 차이 횟수는 공란(0도, 설정 수도 아님), 설정 수·상태는 유지
+        self.assertFalse(merged.has_reference)
+        self.assertTrue(pd.isna(merged.settings_differing_from_reference))
+        self.assertEqual((merged.settings, merged.distinct_statuses), (1, 1))
+        self.assertTrue(out.loc[('A', 'ALL', '2025-08-03'), 'has_reference'])
+
+    def test_recovery_day_range_uses_recovered_rows_only(self):
+        days = sc.recovery_day_range(self.grid()).set_index(sc.SETTING + ['scope'])
+        self.assertEqual(days.loc[('S0', 0.95, 2, 'ALL'), ['recovered', 'min_days', 'max_days']].tolist(), [1, 5, 5])
+        self.assertNotIn(('S3', 0.95, 3, 'ALL'), days.index)
+
+    def test_recovery_grid_runs_every_rule(self):
+        d, e = inputs()
+        d['analysis_role'] = 'case_study'
+        d['phase'] = np.where(d.date.eq('2025-08-01'), 'event', 'observation')
+        data = {'S0': (d, baseline.industry_daily(d), e, None)}
+        grid = sc.recovery_grid(data, [('S0', 2, 14)], [0.9, 1.0], [1, 2])
+        self.assertEqual(grid[sc.SETTING].drop_duplicates().shape[0], 4)
+        # 회귀: 실제 관찰일수(가상자료 1일)를 시나리오 명목 길이(14일)로 덮어쓰지 않는다
+        self.assertTrue(grid.observation_days.eq(1).all())
+        self.assertTrue(grid.nominal_observation_days.eq(14).all())
+        self.assertEqual(set(grid.scope), {'ALL', 'age'})
+        self.assertTrue(grid.recovery_status.isin(sc.STATUSES).all())
+        with self.assertRaises(ValueError):
+            sc.recovery_grid(data, [('S9', 2, 14)], [0.95], [3])
+
+
+def windowed_inputs(spec):
+    """사건마다 1일 사건 + 실제 관찰 n일인 가상 입력. spec: {event_id: (시작일, 실제 관찰일수)}."""
+    rows, events = [], []
+    for event, (start, observed) in spec.items():
+        dates = pd.date_range(start, periods=1 + observed)
+        end = dates[-1].strftime('%Y-%m-%d')
+        for i, date in enumerate(dates):
+            for age in ['20대', '30대']:
+                rows.append(dict(event_id=event, region='R', industry='A', age=age, window_start=start, window_end=end,
+                                 date=date.strftime('%Y-%m-%d'), amount=50. if i == 0 else 100., prediction=100.,
+                                 window_type='effective', baseline_mode='fixed_pre_event',
+                                 missing_policy='exclude_missing', model_id='weekday_mean', is_holiday=False,
+                                 phase='event' if i == 0 else 'observation', analysis_role='case_study'))
+        events.append(dict(event_id=event, start_date=start, end_date=start, observation_end_effective=end,
+                           analysis_role='case_study'))
+    d = pd.DataFrame(rows)
+    return d, baseline.industry_daily(d), pd.DataFrame(events), None
+
+
+class ObservationDaysTests(unittest.TestCase):
+    def test_actual_and_nominal_observation_days_are_both_kept(self):
+        # CUT: 명목 14일이지만 다음 사건에서 절단되어 실제 3일 / FULL: 절단 없이 실제 = 명목 14일
+        data = {'S0': windowed_inputs({'CUT': ('2025-08-01', 3), 'FULL': ('2025-09-01', 14)})}
+        grid = sc.recovery_grid(data, [('S0', 2, 14)], [0.95], [3]).set_index(['event_id', 'age'])
+        self.assertEqual(grid.loc[('CUT', 'ALL'), ['observation_days', 'nominal_observation_days']].tolist(), [3, 14])
+        self.assertEqual(grid.loc[('FULL', 'ALL'), ['observation_days', 'nominal_observation_days']].tolist(), [14, 14])
+        self.assertTrue(grid.observation_days.le(grid.nominal_observation_days).all())
+        # 관찰 3일 모두 기준 이상이므로 절단 창에서도 3일 연속 회복이 판정된다 (첫 관찰일 = 회복일)
+        self.assertEqual((grid.loc[('CUT', 'ALL'), 'recovery_status'], grid.loc[('CUT', 'ALL'), 'recovery_days']),
+                         ('recovered', 1))
+
+
+class ShortfallTests(unittest.TestCase):
+    def shortfall(self):
+        def row(scenario, industry, age, net, rate, event_end='2025-08-03'):
+            return dict(event_id='E1', region='R', industry=industry, age=age, window_start='2025-08-01',
+                        event_end=event_end, scenario=scenario, net_shortfall_nonholiday=net, net_rate_nonholiday=rate,
+                        scope='ALL' if age == 'ALL' else 'age')
+        return pd.DataFrame([
+            row('S0', 'A', 'ALL', 10, 0.10), row('S0', 'B', 'ALL', -5, -0.05), row('S0', 'C', 'ALL', None, None),
+            # S1: A는 부족 → 초과로 부호 변경, B는 그대로, C는 새로 계산 가능
+            row('S1', 'A', 'ALL', -2, -0.02), row('S1', 'B', 'ALL', -5, -0.05), row('S1', 'C', 'ALL', 3, 0.03),
+        ])
+
+    def test_shortfall_sign_and_availability_changes(self):
+        out = sc.shortfall_against_reference(self.shortfall(), 'S0').set_index(['scenario', 'scope'])
+        s1 = out.loc[('S1', 'ALL')]
+        self.assertEqual((s1.reference_available, s1.scenario_available, s1.comparable), (2, 3, 2))
+        self.assertEqual((s1.sign_changed, s1.shortfall_in_reference, s1.shortfall_in_scenario), (1, 1, 0))
+        self.assertAlmostEqual(s1.max_abs_diff_pp, 12.0)
+        self.assertEqual(out.loc[('S0', 'ALL'), 'sign_changed'], 0)
+
+    def test_recovered_does_not_mean_shortfall_recouped(self):
+        grid = pd.DataFrame([unit('E1', 'A', 'ALL', 'recovered', 2), unit('E1', 'B', 'ALL', 'recovered', 3),
+                             unit('E1', 'C', 'ALL', 'censored')])
+        out = sc.recovery_vs_shortfall(grid, self.shortfall(), ('S0', 0.95, 3)).set_index(['scope', 'recovery_status'])
+        recovered = out.loc[('ALL', 'recovered')]
+        self.assertEqual((recovered.net_shortfall_remains, recovered.no_net_shortfall), (1, 1))
+        self.assertEqual(out.loc[('ALL', 'censored'), 'not_computable'], 1)
+
+    def test_shortfall_by_scenario_uses_sales_handoff(self):
+        d, e = inputs()
+        d['analysis_role'] = 'case_study'
+        d['phase'] = np.where(d.date.eq('2025-08-01'), 'event', 'observation')
+        out = sc.shortfall_by_scenario({'S0': (d, baseline.industry_daily(d), e, None)}, [('S0', 2, 14)])
+        self.assertEqual(set(out.scope), {'ALL', 'age'})
+        twenties = out[out.age.eq('20대')].iloc[0]
+        # 20대: 예상 100 × 2일, 실제 0 → 순부족 200, 부족률 100%
+        self.assertEqual((twenties.net_shortfall_nonholiday, twenties.net_rate_nonholiday), (200, 1.0))
+        self.assertEqual(twenties.event_end, '2025-08-01')
+
+
+if __name__ == '__main__':
+    unittest.main()
