@@ -167,7 +167,7 @@ def run(card_path, events_path, windows_path, output, calendar=None):
                 'hyperparameter_search': False, 'holdout_tuning': False,
                 'primary_metrics': ['mae', 'rmse', 'wape'],
                 'calendar_status': 'provided_calendar' if calendar else 'provisional_08_15_only',
-                'selection_status': 'pending team review; no model automatically selected',
+                'selection_status': 'weekday_mean used as Joeun-requested analysis baseline; joint interpretation review pending',
                 'input_sha256': {name: digest(path) for name, path in
                                  [('card', card_path), ('events', events_path), ('windows', windows_path)]},
                 'source_sha256': {name: digest(source_dir / name) for name in

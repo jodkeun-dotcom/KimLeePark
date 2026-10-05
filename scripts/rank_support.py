@@ -15,6 +15,7 @@ import pandas as pd
 
 from scripts import prepare_sales_baseline as baseline
 from scripts.compute_recovery import PRIMARY_INDUSTRIES, recovery_day
+from scripts.support_actions import ACTION_RULES, write_support_review
 
 
 def paired_industry(daily, model):
@@ -88,6 +89,11 @@ def industry_metrics(industry, events, threshold=.95, consecutive=3,
                         'recovery_status': status, 'recovery_days': day,
                         'confirmation_days': day + consecutive - 1 if status == 'recovered' else np.nan,
                         'recovery_date': date, 'observation_days': len(obs),
+                        'observation_start': obs.date.min().strftime('%Y-%m-%d') if len(obs) else None,
+                        'observation_end': obs.date.max().strftime('%Y-%m-%d') if len(obs) else None,
+                        'recovery_observed_days': int(obs.ratio.notna().sum()),
+                        'observation_holiday_days': int(obs.is_holiday.eq(True).sum()),
+                        'observation_nonholiday_unavailable_days': int((~obs.is_holiday.eq(True) & obs.ratio.isna()).sum()),
                         'calendar_provenance': calendar_provenance,
                         'recovery_uncertainty_note': f'{ev.analysis_role}; effective window; all input age groups required; calendar={calendar_provenance}; holiday_policy=break; provisional recovery rule'})
     return pd.DataFrame(records)
@@ -239,8 +245,9 @@ def run(daily_path, events_path, output, run_metadata=None):
     output.mkdir(parents=True, exist_ok=True)
     base.to_csv(output/'support_priority_PROVISIONAL.csv', index=False, encoding='utf-8-sig')
     scenarios.to_csv(output/'priority_sensitivity.csv', index=False, encoding='utf-8-sig')
+    write_support_review(base, scenarios, output)
     pd.DataFrame(changes, columns=['event_id', 'scope', 'decline_higher_industry', 'priority_higher_industry', 'reason']).to_csv(output/'rank_reversals.csv', index=False, encoding='utf-8-sig')
-    rules = {'version': '1007-pareto-v1', 'status': 'analyst-selected provisional policy; not collective approval',
+    rules = {'version': '1007-support-review-v2', 'status': 'Joeun requested this analysis direction; joint interpretation review pending',
              'input_sha256': {'daily': hashlib.sha256(daily_path.read_bytes()).hexdigest(),
                               'events': hashlib.sha256(events_path.read_bytes()).hexdigest()},
              'comparison_groups': ['event_id', 'scope'], 'main_scope': 'primary (18 predefined industries)',
@@ -252,7 +259,11 @@ def run(daily_path, events_path, output, run_metadata=None):
              'base_recovery_rule': {'threshold': .95, 'consecutive_days': 3},
              'sensitivity': {'baseline': ['mean', 'median'], 'threshold': [.9, .95, 1.0], 'consecutive_days': [2, 3, 4]},
              'rank_reversals': len(changes), 'calendar_status': provenance,
-             'holiday_policy': 'break consecutive recovery; exclude from monetary eligible window'}
+             'holiday_policy': 'break consecutive recovery; exclude from monetary eligible window',
+             'support_review': {'category_order': 'none; not funding ranks', 'rules': ACTION_RULES,
+                                'timing': 'retrospective assessment at window_end; not an early-warning backtest',
+                                'duration': 'not estimated; reassess when additional observations arrive',
+                                'policy_effectiveness': 'not evaluated'}}
     if run_metadata:
         rules['input_sha256']['baseline_run_metadata'] = hashlib.sha256(run_metadata.read_bytes()).hexdigest()
     (output/'priority_rules.json').write_text(json.dumps(rules, ensure_ascii=False, indent=2), encoding='utf-8')

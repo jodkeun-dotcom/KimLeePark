@@ -51,11 +51,16 @@ class SupportRankingTests(unittest.TestCase):
         self.assertNotIn('provisional calendar', row.recovery_uncertainty_note)
         self.assertEqual((row.recovery_days, row.confirmation_days), (2, 4))
         self.assertEqual(row.net_shortfall_eligible, 100)
+        self.assertEqual(row.recovery_observed_days, 6)
+        self.assertEqual(row.observation_holiday_days, 0)
+        self.assertEqual(row.observation_nonholiday_unavailable_days, 0)
         self.assertAlmostEqual(row.net_shortfall_rate_eligible, 100/700)
         d.loc[6, 'complete_group_coverage'] = False
         row = industry_metrics(d, events).iloc[0]
         self.assertFalse(row.complete_eligible_window)
         self.assertTrue(pd.isna(row.net_shortfall_eligible))
+        self.assertEqual(row.recovery_observed_days, 5)
+        self.assertEqual(row.observation_nonholiday_unavailable_days, 1)
 
     def test_stability_counts_unrankable_scenarios_in_denominator(self):
         d = pd.DataFrame({'event_id': 'E', 'region': 'R', 'industry': 'A', 'scope': 'primary',
