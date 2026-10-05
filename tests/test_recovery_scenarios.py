@@ -125,5 +125,45 @@ class ComparisonTests(unittest.TestCase):
             sc.recovery_grid(data, [('S9', 2, 14)], [0.95], [3])
 
 
+class ShortfallTests(unittest.TestCase):
+    def shortfall(self):
+        def row(scenario, industry, age, net, rate, event_end='2025-08-03'):
+            return dict(event_id='E1', region='R', industry=industry, age=age, window_start='2025-08-01',
+                        event_end=event_end, scenario=scenario, net_shortfall_nonholiday=net, net_rate_nonholiday=rate,
+                        scope='ALL' if age == 'ALL' else 'age')
+        return pd.DataFrame([
+            row('S0', 'A', 'ALL', 10, 0.10), row('S0', 'B', 'ALL', -5, -0.05), row('S0', 'C', 'ALL', None, None),
+            # S1: A는 부족 → 초과로 부호 변경, B는 그대로, C는 새로 계산 가능
+            row('S1', 'A', 'ALL', -2, -0.02), row('S1', 'B', 'ALL', -5, -0.05), row('S1', 'C', 'ALL', 3, 0.03),
+        ])
+
+    def test_shortfall_sign_and_availability_changes(self):
+        out = sc.shortfall_against_reference(self.shortfall(), 'S0').set_index(['scenario', 'scope'])
+        s1 = out.loc[('S1', 'ALL')]
+        self.assertEqual((s1.reference_available, s1.scenario_available, s1.comparable), (2, 3, 2))
+        self.assertEqual((s1.sign_changed, s1.shortfall_in_reference, s1.shortfall_in_scenario), (1, 1, 0))
+        self.assertAlmostEqual(s1.max_abs_diff_pp, 12.0)
+        self.assertEqual(out.loc[('S0', 'ALL'), 'sign_changed'], 0)
+
+    def test_recovered_does_not_mean_shortfall_recouped(self):
+        grid = pd.DataFrame([unit('E1', 'A', 'ALL', 'recovered', 2), unit('E1', 'B', 'ALL', 'recovered', 3),
+                             unit('E1', 'C', 'ALL', 'censored')])
+        out = sc.recovery_vs_shortfall(grid, self.shortfall(), ('S0', 0.95, 3)).set_index(['scope', 'recovery_status'])
+        recovered = out.loc[('ALL', 'recovered')]
+        self.assertEqual((recovered.net_shortfall_remains, recovered.no_net_shortfall), (1, 1))
+        self.assertEqual(out.loc[('ALL', 'censored'), 'not_computable'], 1)
+
+    def test_shortfall_by_scenario_uses_sales_handoff(self):
+        d, e = inputs()
+        d['analysis_role'] = 'case_study'
+        d['phase'] = np.where(d.date.eq('2025-08-01'), 'event', 'observation')
+        out = sc.shortfall_by_scenario({'S0': (d, baseline.industry_daily(d), e, None)}, [('S0', 2, 14)])
+        self.assertEqual(set(out.scope), {'ALL', 'age'})
+        twenties = out[out.age.eq('20대')].iloc[0]
+        # 20대: 예상 100 × 2일, 실제 0 → 순부족 200, 부족률 100%
+        self.assertEqual((twenties.net_shortfall_nonholiday, twenties.net_rate_nonholiday), (200, 1.0))
+        self.assertEqual(twenties.event_end, '2025-08-01')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -14,9 +14,11 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 import compute_recovery_from_baseline as common
+import prepare_sales_handoff as sales
 
 STATUSES = ['no_decline', 'recovered', 'censored', 'insufficient_data']
 STATUS_KO = {'no_decline': '감소 없음', 'recovered': '회복', 'censored': '관찰기간 내 회복 미확인',
@@ -137,12 +139,73 @@ def recovery_day_range(grid):
     return out
 
 
+def shortfall_by_scenario(inputs, scenarios):
+    """시나리오별 effective 창의 순누적 부족 (prepare_sales_handoff.build의 진단값).
+
+    net_shortfall_nonholiday / net_rate_nonholiday: 비공휴일 전체 창이 완전할 때만 값이 있다. 양수 = 기준선 대비 부족.
+    """
+    parts = []
+    for name, gap, days in scenarios:
+        if name not in inputs:
+            raise ValueError(f'no inputs for scenario {name}')
+        predictions, _, events, metadata = inputs[name]
+        _, diagnostic = sales.build(predictions, events, metadata)
+        ends = events.set_index('event_id').end_date
+        diagnostic = diagnostic.assign(scenario=name, max_gap_days=gap, observation_days=days,
+                                       event_end=diagnostic.event_id.map(ends))
+        parts.append(diagnostic[UNIT + ['scenario', 'max_gap_days', 'observation_days', 'window_end',
+                                        'net_shortfall_nonholiday', 'net_rate_nonholiday']])
+    if not parts:
+        raise ValueError('no scenarios for shortfall comparison')
+    out = pd.concat(parts, ignore_index=True)
+    out['scope'] = out.age.eq('ALL').map({True: 'ALL', False: 'age'})
+    return out
+
+
+def shortfall_against_reference(shortfall, reference_scenario):
+    """관찰기간·사건 정의가 바뀔 때 순누적 부족률의 계산 가능 여부, 부호, 크기 변화 (같은 단위)."""
+    ref = shortfall[shortfall.scenario.eq(reference_scenario)]
+    if ref.empty:
+        raise ValueError(f'reference scenario {reference_scenario} not in shortfall table')
+    ref = ref[UNIT + ['scope', 'net_shortfall_nonholiday', 'net_rate_nonholiday']]
+    merged = shortfall.merge(ref, on=UNIT + ['scope'], suffixes=('', '_ref'), validate='many_to_one')
+    rows = []
+    for (scenario, scope), g in merged.groupby(['scenario', 'scope']):
+        both = g.net_rate_nonholiday.notna() & g.net_rate_nonholiday_ref.notna()
+        c = g[both]
+        sign = np.sign(c.net_shortfall_nonholiday).ne(np.sign(c.net_shortfall_nonholiday_ref))
+        diff = (c.net_rate_nonholiday - c.net_rate_nonholiday_ref).abs() * 100
+        rows.append({'scenario': scenario, 'scope': scope, 'matched': len(g),
+                     'reference_available': int(g.net_rate_nonholiday_ref.notna().sum()),
+                     'scenario_available': int(g.net_rate_nonholiday.notna().sum()),
+                     'comparable': int(both.sum()),
+                     'shortfall_in_reference': int((c.net_shortfall_nonholiday_ref > 0).sum()),
+                     'shortfall_in_scenario': int((c.net_shortfall_nonholiday > 0).sum()),
+                     'sign_changed': int(sign.sum()),
+                     'median_abs_diff_pp': float(diff.median()) if len(c) else np.nan,
+                     'max_abs_diff_pp': float(diff.max()) if len(c) else np.nan})
+    return pd.DataFrame(rows)
+
+
+def recovery_vs_shortfall(grid, shortfall, reference):
+    """기준 설정의 회복 상태별로 같은 창의 순누적 부족이 남았는지 센다 (회복 ≠ 누적 부족 만회 확인용)."""
+    status = select(grid, reference)[UNIT + ['scope', 'recovery_status']]
+    net = shortfall[shortfall.scenario.eq(reference[0])][UNIT + ['scope', 'net_shortfall_nonholiday']]
+    merged = status.merge(net, on=UNIT + ['scope'], how='left', validate='one_to_one')
+    merged['net_class'] = np.select(
+        [merged.net_shortfall_nonholiday.isna(), merged.net_shortfall_nonholiday > 0],
+        ['not_computable', 'net_shortfall_remains'], 'no_net_shortfall')
+    return (merged.groupby(['scope', 'recovery_status', 'net_class']).size()
+            .unstack('net_class', fill_value=0).reset_index())
+
+
 def select(grid, setting):
     scenario, threshold, run = setting
     return grid[grid.scenario.eq(scenario) & grid.threshold.eq(threshold) & grid.consecutive_days.eq(run)]
 
 
-def summary_markdown(distribution, changes, transitions, stable, days, unmatched, reference):
+def summary_markdown(distribution, changes, transitions, stable, days, unmatched, reference, shortfall_changes,
+                     recovery_net):
     def table(frame):
         header = '| ' + ' | '.join(map(str, frame.columns)) + ' |'
         rule = '|' + '---|' * len(frame.columns)
@@ -160,6 +223,8 @@ def summary_markdown(distribution, changes, transitions, stable, days, unmatched
         '## 모든 설정에서 같은 상태를 유지한 비율\n', table(stable), '\n',
         '## 회복일 범위 (회복 행만)\n', table(days), '\n',
         '## 기준과 대응되지 않는 사건 (병합 등)\n', table(merged), '\n',
+        '## 관찰기간·사건 정의에 따른 순누적 부족률 변화 (비공휴일 완전 창)\n', table(shortfall_changes), '\n',
+        '## 회복 상태별 순누적 부족 (기준 설정)\n', table(recovery_net), '\n',
     ]
     return '\n'.join(parts)
 
@@ -183,6 +248,9 @@ def main():
     changes, transitions, unmatched = against_reference(grid, reference)
     stable = stability(grid, reference)
     days = recovery_day_range(grid)
+    shortfall = shortfall_by_scenario(inputs, scenarios)
+    shortfall_changes = shortfall_against_reference(shortfall, reference[0])
+    recovery_net = recovery_vs_shortfall(grid, shortfall, reference)
     out = args.output
     out.mkdir(parents=True, exist_ok=True)
     grid.to_csv(out / 'recovery_grid_metrics_PRIVATE_REVIEW_ONLY.csv', index=False, encoding='utf-8-sig')
@@ -192,8 +260,12 @@ def main():
     transitions.to_csv(out / 'reference_transitions.csv', index=False, encoding='utf-8-sig')
     stable.to_csv(out / 'stability.csv', index=False, encoding='utf-8-sig')
     days.to_csv(out / 'recovery_day_range.csv', index=False, encoding='utf-8-sig')
+    shortfall.to_csv(out / 'shortfall_by_scenario_PRIVATE_REVIEW_ONLY.csv', index=False, encoding='utf-8-sig')
+    shortfall_changes.to_csv(out / 'shortfall_changes.csv', index=False, encoding='utf-8-sig')
+    recovery_net.to_csv(out / 'recovery_vs_shortfall.csv', index=False, encoding='utf-8-sig')
     (out / 'sensitivity_summary.md').write_text(
-        summary_markdown(distribution, changes, transitions, stable, days, unmatched, reference), encoding='utf-8')
+        summary_markdown(distribution, changes, transitions, stable, days, unmatched, reference, shortfall_changes,
+                         recovery_net), encoding='utf-8')
     print(f'{len(grid)} rows over {grid[SETTING].drop_duplicates().shape[0]} settings; review only, no rankings')
 
 
