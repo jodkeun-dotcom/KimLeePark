@@ -3,7 +3,7 @@
 관련: #11 (← #8). #13 우선순위 표의 순위 안정성 검토는 PR #31 병합 후 추가한다. 상태: **검토용**. 기준값을 확정하지 않으며 지원 순위를 만들지 않는다.
 아래는 건수·비율만 담는다. 업종별 행과 금액은 로컬 `outputs/seeun_1005to1007/`의 `*_PRIVATE_REVIEW_ONLY.csv`에만 있다.
 
-시나리오별 사건 파일(`outputs/seeun_1005to1007/scenarios/S0~S4/weather_events/*.csv`)과 타임라인(`weather_event_timeline.png`)은 공개 기상자료로 만든 것이라 저장소에 포함한다. 같은 폴더의 `baseline/`(카드 매출 금액)과 상위 폴더의 집계 CSV는 `.gitignore`로 제외한다. 포함된 사건 파일은 아래 재현 명령으로 다시 만들어도 바이트 단위로 같다.
+시나리오 S0~S4의 공개 기상 사건 CSV 5종(`weather_events/`의 `weather_events.csv`, `weather_event_windows.csv`, `weather_daily_events.csv`, `weather_event_counts.csv`, `weather_missing_by_date.csv`)과 타임라인(`weather_event_timeline.png`)만 저장소에 포함한다. `.gitignore`는 이 파일 이름만 허용하므로 같은 폴더에 다른 CSV가 생겨도 추적되지 않는다. `baseline/`(카드 매출 금액), 상위 폴더의 집계·PRIVATE CSV, 팀 내부 ZIP은 제외한다. 포함된 사건 파일은 아래 재현 명령으로 다시 만들어도 바이트 단위로 같다.
 
 - 회복은 **그날 매출 수준의 회복**이며 누적 부족의 만회가 아니다. 기준선 대비 차이이고 인과적 폭염 피해액이 아니다.
 - 사건이 2~3건뿐이므로 신뢰구간을 만들지 않고 **설정별 결과 범위(최소~최대)** 로 표현한다.
