@@ -45,7 +45,10 @@ class SupportRankingTests(unittest.TestCase):
                           'model_id': 'weekday_mean'})
         events = pd.DataFrame({'event_id': ['E'], 'start_date': ['2025-08-01'],
                                'end_date': ['2025-08-01'], 'analysis_role': ['case_study']})
-        row = industry_metrics(d, events).iloc[0]
+        row = industry_metrics(d, events, calendar_provenance='provided_calendar').iloc[0]
+        self.assertEqual(row.calendar_provenance, 'provided_calendar')
+        self.assertIn('calendar=provided_calendar', row.recovery_uncertainty_note)
+        self.assertNotIn('provisional calendar', row.recovery_uncertainty_note)
         self.assertEqual((row.recovery_days, row.confirmation_days), (2, 4))
         self.assertEqual(row.net_shortfall_eligible, 100)
         self.assertAlmostEqual(row.net_shortfall_rate_eligible, 100/700)

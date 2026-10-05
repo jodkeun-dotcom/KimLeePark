@@ -33,7 +33,8 @@ def paired_industry(daily, model):
     return aggregate.merge(flags, on=['event_id', 'date'], validate='many_to_one')
 
 
-def industry_metrics(industry, events, threshold=.95, consecutive=3):
+def industry_metrics(industry, events, threshold=.95, consecutive=3,
+                     calendar_provenance='unknown_review_required'):
     if not 0 < threshold <= 1 or consecutive < 1:
         raise ValueError('invalid recovery rule')
     event_info = events.set_index('event_id')
@@ -87,7 +88,8 @@ def industry_metrics(industry, events, threshold=.95, consecutive=3):
                         'recovery_status': status, 'recovery_days': day,
                         'confirmation_days': day + consecutive - 1 if status == 'recovered' else np.nan,
                         'recovery_date': date, 'observation_days': len(obs),
-                        'recovery_uncertainty_note': f'{ev.analysis_role}; effective window; matched age groups only; provisional calendar'})
+                        'calendar_provenance': calendar_provenance,
+                        'recovery_uncertainty_note': f'{ev.analysis_role}; effective window; all input age groups required; calendar={calendar_provenance}; holiday_policy=break; provisional recovery rule'})
     return pd.DataFrame(records)
 
 
@@ -199,16 +201,27 @@ def plot_results(base, scenarios, output):
     plt.close(fig)
 
 
-def run(daily_path, events_path, output):
+def run(daily_path, events_path, output, run_metadata=None):
     if output.exists() and any(output.iterdir()):
         raise ValueError('use a new output directory')
     daily = pd.read_csv(daily_path, parse_dates=['date', 'window_start', 'window_end'])
     events = pd.read_csv(events_path)
+    metadata = json.loads(run_metadata.read_text(encoding='utf-8-sig')) if run_metadata else {}
+    if not isinstance(metadata, dict):
+        raise ValueError('run metadata must be an object')
+    provenance = metadata.get('calendar_provenance', 'unknown_review_required')
+    if not isinstance(provenance, str) or not provenance.strip():
+        raise ValueError('invalid calendar provenance')
+    if 'daily_rows' in metadata and metadata['daily_rows'] != len(daily):
+        raise ValueError('run metadata row count differs')
+    daily['is_holiday'] = baseline.bool_column(daily.is_holiday, 'is_holiday')
+    if provenance == 'provisional_2025_08_15_only' and not daily.is_holiday.eq(daily.date.eq(pd.Timestamp('2025-08-15'))).all():
+        raise ValueError('calendar flags differ from declared provisional calendar')
     scenarios = []
     for model in ['weekday_mean', 'weekday_median']:
         industry = paired_industry(daily, model)
         for threshold, days in product([.90, .95, 1.0], [2, 3, 4]):
-            result = rank_metrics(industry_metrics(industry, events, threshold, days))
+            result = rank_metrics(industry_metrics(industry, events, threshold, days, provenance))
             result['scenario'] = f'{model}_threshold{threshold:.2f}_run{days}'
             scenarios.append(result)
     scenarios = pd.concat(scenarios, ignore_index=True)
@@ -238,7 +251,10 @@ def run(daily_path, events_path, output):
              'monetary_scope': 'eligible nonholiday days only; never full-window or city-wide damage',
              'base_recovery_rule': {'threshold': .95, 'consecutive_days': 3},
              'sensitivity': {'baseline': ['mean', 'median'], 'threshold': [.9, .95, 1.0], 'consecutive_days': [2, 3, 4]},
-             'rank_reversals': len(changes), 'calendar_status': 'inherits baseline input provenance'}
+             'rank_reversals': len(changes), 'calendar_status': provenance,
+             'holiday_policy': 'break consecutive recovery; exclude from monetary eligible window'}
+    if run_metadata:
+        rules['input_sha256']['baseline_run_metadata'] = hashlib.sha256(run_metadata.read_bytes()).hexdigest()
     (output/'priority_rules.json').write_text(json.dumps(rules, ensure_ascii=False, indent=2), encoding='utf-8')
     plot_results(base, scenarios, output)
     print(base.groupby(['event_id', 'scope', 'review_queue']).size().to_string())
@@ -250,6 +266,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--daily', type=Path, required=True)
     parser.add_argument('--events', type=Path, required=True)
+    parser.add_argument('--run-metadata', type=Path, help='Metadata from the same baseline run; does not certify API provenance')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
-    run(args.daily, args.events, args.output)
+    run(args.daily, args.events, args.output, args.run_metadata)

@@ -1,4 +1,8 @@
-"""Join provisional age-detail metrics without deciding support rankings."""
+"""Legacy PR30 comparison only; use run_support_review for PR32 integration.
+
+The --curves input uses the old PR30 'expected' schema. Do not pass PR32 curves
+or replace missing common-baseline values with this historical comparison.
+"""
 import argparse
 from pathlib import Path
 

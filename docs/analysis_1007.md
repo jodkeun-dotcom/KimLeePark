@@ -1,6 +1,12 @@
 # 10월 7일 조은 작업: 이후 기간 예측 비교와 지원 우선순위
 
-관련: #13. 기준 main: `5b090d4`. 코드 실행 결과는 로컬 보관하며, 공개 PR에는 코드·방법·가상자료 테스트만 포함한다.
+관련: #13, #27, #12, #11. 통합 기준 main: `d24b24a` (PR #32 머지 포함). 최초 실험의 기준은 `5b090d4`이며 이전 실행 기록을 덮어쓰지 않는다. 공개 PR에는 코드·방법·가상자료 테스트만 포함한다.
+
+## 현재 상태
+
+- #32의 완전 연령 그룹 회복 정의와 #31의 기본 회복·비공휴일 매출 지표를 같은 키로 대조한다. 이 일치 검사는 기준의 공동 승인이나 정책 효과 검증이 아니다.
+- #27 전체 공휴일 달력·실제 조회일·인증키를 제외한 요청 조건·원본 응답은 수신 대기다. 안내서와 월별 조회 방법은 확보했지만 실제 응답을 확보한 것으로 표시하지 않는다.
+- 달력 없는 실행은 8/15만 제외한 잠정 재현이다. 달력을 받으면 같은 달력으로 기준선·회복·모델·우선순위를 새 폴더에서 모두 갱신한다. #12/#13을 자동 완료하지 않는다.
 
 ## 진행 범위
 
@@ -31,9 +37,21 @@
 
 ## 공통 매출과 회복 연결
 
-`prepare_support_inputs`는 연령별 결과를 같은 사건·관찰기간 키로 1:1 연결한다. 불완전한 기간의 paired 부족액은 진단 열에 남기고, 전체 기간 부족액을 대신하지 않는다. 업종 전체의 기존 #30 `age=ALL`과 #29의 paired 집계 차이는 별도 파일로 드러낸다.
+현재 통합 경로는 #29 `daily_predictions.csv`·`daily_industry.csv` → #32 `sales_handoff.csv`·`recovery_handoff_common_baseline.csv` → `prepare_priority`의 전체 기간 전달표다. 모든 파일은 같은 실행 폴더에서 생성한다. 연령별 행과 ALL을 합산하거나 한 순위로 섞지 않는다.
 
-`rank_support`는 선하의 업종별 집계 함수를 재사용한다. 같은 날짜에 실제·예상이 모두 있는 같은 연령 그룹만 양쪽에 합산한다. 모든 입력 연령 그룹이 사용된 날짜에서만 회복 비율을 계산한다. 빠진 날짜·집단을 실제 0으로 바꾸지 않는다. 기존 세은 코드를 덮어쓰지 않고 `recovery_day`의 연속 기준을 재사용한다.
+`prepare_support_inputs`는 기존 #30의 집계 차이를 확인하는 과거 비교 전용이다. 그 `--curves`는 `expected` 열이 있는 #30 형식이며, `prediction` 열을 쓰는 #32 곡선을 대신 넣으면 안 된다. 현재 공통 전달표의 결측을 기존 #30 결과로 보충하지 않는다.
+
+`rank_support`는 선하의 업종별 집계 함수를 재사용한다. 같은 날짜에 실제·예상이 모두 있는 같은 연령 그룹만 양쪽에 합산한다. 모든 입력 연령 그룹이 사용된 날짜에서만 회복 비율을 계산한다. 빠진 날짜·집단을 실제 0으로 바꾸지 않는다. #32와 같은 `recovery_day`를 재사용하고 공휴일·불완전 날짜에서 연속 회복을 끊는다. `--run-metadata`로 같은 기준선의 달력 출처를 보존하며 메타정보가 없으면 `unknown_review_required`로 남긴다.
+
+`run_support_review`는 기본 평균·95%·3일 결과의 키·회복 상태·일수·날짜·기준 및 아래 eligible 매출 지표가 #32와 일치하는지 검사한다. 다른 키, 공란을 숫자로 바꾼 결과, 불일치한 기준은 실패 처리한다. 전체 기간 전달표의 순위 칸은 비워 두고 잠정 Pareto 결과는 별도 파일에 보관한다.
+
+| 구분 | 대상 기간·분모 | 파일과 해석 |
+|---|---|---|
+| full | 사건 시작~유효 관찰 종료의 공휴일 포함 전체 날짜. 비율 분모는 같은 기간 예상 합 | #32 `sales_handoff.csv`의 `gross_shortfall`, `net_shortfall`, `net_shortfall_rate`. 전체 날짜·그룹이 완전하지 않으면 공란 |
+| eligible | 같은 창의 **비공휴일 전체**. 비율 분모도 그 날짜의 예상 합 | #31 `*_eligible`, #32 진단의 `net_shortfall_nonholiday`·`net_rate_nonholiday`. 비공휴일이 불완전하면 공란 |
+| paired | 실제·예상이 함께 있는 관측의 소계. ALL은 날짜마다 같은 연령끼리 합산하되 구성은 달라질 수 있음 | #32 진단의 `*_paired`. 전체 또는 eligible 기간 부족액을 대신할 수 없음 |
+
+사건 감소율은 사건 발생 기간 전체가 완전해야 계산하며, 위 비공휴일 부족률과 기간이 다르다. ALL의 gross는 날짜별 연령 합산 뒤 양수 처리한다. 제공 금액 단위를 유지하며 인과적 폭염 피해액·춘천 전체 피해액으로 부르지 않는다.
 
 사건 기간 자료가 불완전하면 감소율·회복을 확정하지 않는다. 회복은 첫 기준 충족일과 연속 충족을 확인한 날을 구분한다. 예를 들어 +3일부터 3일 연속이면 회복 첫날은 +3일, 확인 시점은 +5일이다. 미회복·관찰 부족에는 임의의 일수를 채우지 않는다.
 
@@ -49,23 +67,50 @@
 
 공동 검토 전 잠정 분석이다. 엄격한 자료 조건으로 순위를 매길 대상이 적으면 기준을 사후에 낮춰 결과를 만들지 않는다. 자료 부족 대상은 추가 확인으로 전달한다.
 
-## 재현
+## 현재 결과의 해석 한계
 
-저장소 루트에서 `python -m pip install -r requirements-analysis.txt` 후 실행한다. 제공 카드자료는 로컬에 준비한다.
+달력 갱신 전 공유본은 주 분석 54개 조합 중 순위 가능 후보가 1개이며, 그 후보는 18개 설정 중 6개에서만 유지됐다. 여러 업종의 순위를 충분히 비교했다거나 정책 대상을 확정했다고 주장할 수 없다. 이 수치는 잠정 실행의 결과이며 달력 갱신 후 재확인한다. 관찰 종료로 인한 회복 미확인·자료 부족의 공란은 낮은 지원 필요성이나 피해 없음이 아니다. 세은과 관찰 절단·회복 해석을 공동 확인한다.
+
+모델 비교의 표 집계 재현과 AI의 직접 재학습 검증은 구분한다. 행별 예측과 실제값, 학습·평가 범위, 제외 행을 비공개 공유본에 함께 제공하면 팀원이 오차를 독립 재계산할 수 있다. 이전 검토자의 미실행 범위를 실행 완료로 바꾸어 적지 않는다.
+
+## 재현과 입력 파일 기록
+
+저장소 루트에서 `python -m pip install -r requirements-analysis.txt` 후 실행한다. 카드·기상 사건·관찰기간 파일은 로컬에 준비한다. 사건 목록이 없다면 `python scripts/label_weather_events.py`로 먼저 생성한다.
+
+**전체 달력 수신 후의 통합 실행**: 달력은 2025-07-01~12-31 전체 184일의 `date,is_holiday`를 포함해야 한다. 같은 입력 사본과 달력으로 기준선·회복·모델·우선순위를 실행한다.
 
 ```bash
-python scripts/label_weather_events.py
-python -m scripts.prepare_sales_baseline --daily data/processed/card/daily.csv --events data/processed/weather_events/weather_events.csv --event-windows data/processed/weather_events/weather_event_windows.csv --output outputs/sunha_baseline
-python scripts/compute_recovery.py
-
-python -m scripts.evaluate_models --card data/processed/card/daily.csv --events data/processed/weather_events/weather_events.csv --windows data/processed/weather_events/weather_event_windows.csv --output outputs/joeun_1007/model_v1
-
-python -m scripts.prepare_support_inputs --sales outputs/sunha_baseline/event_shortfall.json --recovery data/processed/recovery/recovery_handoff.csv --industry outputs/sunha_baseline/daily_industry.csv --curves data/processed/recovery/recovery_curves.csv --output outputs/joeun_1007/integration
-
-python -m scripts.rank_support --daily outputs/sunha_baseline/daily_predictions.csv --events data/processed/weather_events/weather_events.csv --output outputs/joeun_1007/priority_v1
+python -m scripts.run_support_review --card data/processed/card/daily.csv --events data/processed/weather_events/weather_events.csv --windows data/processed/weather_events/weather_event_windows.csv --calendar data/external/calendar.csv --output outputs/joeun_1007/calendar_review_v1
 python -m unittest discover -s tests -v
 ```
 
-모델·우선순위 실행은 기존 결과가 있는 폴더를 거부한다. 기존 평가를 보존하고 새 실험 폴더를 명시한다. 모델 비교에 달력을 제공할 경우 전체 184일 자료를 준비하고 선하의 기준모델에도 같은 달력을 전달해야 한다.
+**전체 달력 없이 기존 결과 재현**: 아래 실행은 #27 완료가 아니며 8/15만 제외한 잠정 결과다.
 
-산출물은 `performance.csv`, `coverage.csv`, `split_audit.csv`, 예측 상세, `support_inputs_age_PROVISIONAL.csv`, `industry_aggregation_check.csv`, `support_priority_PROVISIONAL.csv`, `priority_sensitivity.csv`, `rank_reversals.csv`, 설정 JSON과 그림이다. 모두 `.gitignore`가 적용되는 `outputs/`에 두며 수치 CSV·그림·입력은 공개 저장소에 커밋하지 않는다.
+```bash
+python -m scripts.run_support_review --card data/processed/card/daily.csv --events data/processed/weather_events/weather_events.csv --windows data/processed/weather_events/weather_event_windows.csv --output outputs/joeun_1007/provisional_review_v1
+```
+
+출력 폴더는 비어 있어야 한다. `inputs/`에 고정된 비공개 사본을 만들고 첫 실행 전에 `review_run.json`을 기록한다. 각 단계의 시작·종료·명령·성공 여부, 코드 해시와 Python/라이브러리 버전, 결과 해시를 남긴다. 실행 중 입력 또는 분석 코드가 바뀌거나 기본 결과가 #32와 다르면 실패 상태로 남긴다. 입력 사본·로그·행별 예측은 공개 GitHub에 올리지 않는다.
+
+- `sha256`: 파일 바이트 기준. 동일하면 정확히 같은 파일이다.
+- `csv_text_cells_sha256`: BOM·줄바꿈·열/행 순서 차이를 제거한 CSV 문자열 셀 기준. 중복행은 보존한다. 숫자 표기(예: `1`과 `1.0`) 등은 통일하지 않으며, 같아도 분석 타당성을 보증하지 않는다.
+- 팀원 파일과 바이트 해시가 다르면 파일 버전·생성 코드·위 셀 해시를 함께 비교한다. 이전 선하 입력 사본을 받지 않았으므로 기존 차이의 원인이 인코딩이나 정렬이라고 단정하지 않는다. 현재 기록은 새 실행의 출처이며 과거 생성 시점을 소급 인증하지 않는다.
+- 모델의 `protocol.json`은 동일 카드·사건·창·달력 해시를 저장한다. 우선순위 `priority_rules.json`은 그 실행의 일별 예상값·사건·기준선 메타정보 해시를 저장한다. `baseline/run_metadata.json`과 함께 공유한다.
+- `started_at_utc`는 **분석 실행 시각**이다. 원본 API 조회일과 구분하며 조회일을 추정해서 채우지 않는다. 달력 파일을 전달했다는 사실만으로 API 원본·출처 검증이 완료되지 않는다.
+
+주요 결과 폴더는 `baseline/`, `common_sales/`, `common_recovery/`, `common_full_join/`, `model/`, `priority/`다. full 전달표와 eligible 잠정 순위표를 별도로 유지한다. 이전 #30 결과는 별도 `outputs/legacy_recovery/`에서만 비교하며 새 실행 경로에 넣지 않는다. 기존 민감도 비교 방법은 [공통 전달본 안내](common_baseline_handoff.md)를 참고한다.
+
+## 공휴일 자료 도착 후 남은 확인
+
+1. 월별 2025년 07~12월 `getRestDeInfo`의 정상 응답·페이지 누락·중복·공휴일 표시를 확인한다. 공휴일 없는 달의 응답도 보존하고 실제 조회일과 인증키를 제외한 요청 조건을 기록한다.
+2. 184일 달력을 만든 뒤 위 통합 명령을 새 폴더에서 실행한다. 모델과 기준선에 같은 달력이 전달된다.
+3. 이전 잠정 실행과 매출·회복·모델 성능·순위 후보/공란 변경을 비교한다. 이미 확인한 평가기간을 새 미사용 평가자료로 부르지 않는다.
+4. 새 비공개 공유본과 생성 기록을 교차 검토한다. 평균/중앙값·회복·지원 규칙 및 정책 해석의 공동 확인 후 #12/#13 완료 여부를 판단한다.
+
+## 이번 보완의 로컬 검증
+
+- #32 머지 main과 이 변경을 합친 전체 테스트 96개 통과. 새 연결·기록 검사 7개는 `python -O`에서도 통과했다. GitHub 자동 검사가 실행됐다는 뜻은 아니다.
+- 같은 실제 자료를 고정 사본으로 복사해 기준선·#32 매출/회복·결합·모델·우선순위 6단계를 모두 재실행했다. 전체 공휴일 달력을 받은 실행이 아니며 잠정 8/15 설정이다.
+- ALL 255개 조합의 회복 상태·일수·날짜·기준, 사건 감소율과 비공휴일 net/gross·순부족률의 값·공란이 #32와 일치했다.
+- 이전 공유본 대비 기준선 일별 예상 198,364행, 모델 성능표 2,074행, 우선순위 255행, 민감도 4,590행의 계산 결과가 유지됐다. 두 평가기간·두 모델의 전체 MAE/RMSE/WAPE도 행별 예측으로 별도 재계산했다.
+- 우리 이전·이번 카드/사건/창 입력의 바이트 해시는 일치했다. 선하의 다른 해시 원인은 해당 입력 파일과 생성 기록을 추가 대조해야 하며 이번 검증으로 해결됐다고 주장하지 않는다.
