@@ -136,6 +136,20 @@ class FinalCurveTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'different'):
             fc.panel_data(curves, extra, ['한식'])
 
+    def test_values_above_axis_are_counted_not_dropped(self):
+        # 리뷰 지적: 세로축(0~2) 밖 값이 그림에서 표시 없이 잘리지 않아야 한다
+        curves, metrics = curve_inputs()
+        curves.loc[2, 'ratio'] = 2.5                     # 판정용 비율 하나가 2 초과
+        curves.loc[3, 'ratio_paired_exploratory'] = 3.0  # 판정용이 빈 날의 참고용 비율이 2 초과
+        data, threshold, run = fc.panel_data(curves, metrics, ['한식'])
+        with tempfile.TemporaryDirectory() as tmp:
+            panels = fc.plot_event(data, threshold, run, Path(tmp) / 'E1.png', ['한식'])
+        row = panels.iloc[0]
+        self.assertEqual((row.judged_above, row.partial_above, row.judged_below, row.partial_below), (1, 1, 0, 0))
+        self.assertEqual(row.max_value, 3.0)
+        # 원래 값은 그대로 둔다 (표시만 경계에 고정)
+        self.assertEqual(data.ratio.max(), 2.5)
+
     def test_plot_writes_figure(self):
         curves, metrics = curve_inputs()
         data, threshold, run = fc.panel_data(curves, metrics, ['한식'])

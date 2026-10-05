@@ -92,7 +92,25 @@ def event_caption(g, threshold, run):
     return text
 
 
+Y_LIMITS = (0.0, 2.0)   # 업종 간 비교를 위해 공통 세로축을 유지하고, 범위 밖 값은 경계 표식·건수로 드러낸다
+
+
+def out_of_range(h, limits=Y_LIMITS):
+    """패널 하나에서 세로축 밖의 판정용·참고용 점 수와 최소·최대값 (원래 값은 바꾸지 않는다)."""
+    low, high = limits
+    values = {'judged': h.ratio, 'partial': h.ratio_partial_only}
+    out = {}
+    for name, v in values.items():
+        out[f'{name}_above'] = int(v.gt(high).sum())
+        out[f'{name}_below'] = int(v.lt(low).sum())
+    both = pd.concat(values.values())
+    out['max_value'] = float(both.max()) if both.notna().any() else np.nan
+    out['min_value'] = float(both.min()) if both.notna().any() else np.nan
+    return out
+
+
 def plot_event(g, threshold, run, path, industries=PRIMARY):
+    """사건 하나의 업종별 곡선 그림. 패널별 세로축 밖 점 수를 담은 표를 돌려준다."""
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -105,6 +123,7 @@ def plot_event(g, threshold, run, path, industries=PRIMARY):
     rows = int(np.ceil(len(present) / cols))
     with plt.rc_context({'font.family': korean[:1] or ['DejaVu Sans'], 'axes.unicode_minus': False}):
         fig, axes = plt.subplots(rows, cols, figsize=(cols * 2.5, rows * 2.1 + 1.1), sharex=True, sharey=True)
+        overflow = []
         for ax, industry in zip(axes.flat, present):
             h = g[g.industry.eq(industry)]
             event_x = h.loc[h.window.eq('event'), 'day_offset']
@@ -113,6 +132,24 @@ def plot_event(g, threshold, run, path, industries=PRIMARY):
                 ax.axvline(x, color=muted, linewidth=0.6, linestyle=':')
             ax.plot(h.day_offset, h.ratio, color=line, linewidth=2, marker='o', markersize=2.5)
             ax.scatter(h.day_offset, h.ratio_partial_only, color=muted, s=6, alpha=0.6)
+            # 축 밖 점은 경계에 ▲/▼로 남기고 건수·최대값을 적는다 (판정용 = 파랑, 참고용 = 회색)
+            low, high = Y_LIMITS
+            for values, color in [(h.ratio, line), (h.ratio_partial_only, muted)]:
+                above, below = values.gt(high), values.lt(low)
+                ax.scatter(h.day_offset[above], np.full(int(above.sum()), high), marker='^', s=28, color=color,
+                           clip_on=False, zorder=4)
+                ax.scatter(h.day_offset[below], np.full(int(below.sum()), low), marker='v', s=28, color=color,
+                           clip_on=False, zorder=4)
+            over = out_of_range(h)
+            overflow.append({'industry': industry, **over})
+            notes = []
+            if over['judged_above'] or over['partial_above']:
+                notes.append(f"▲ {high:g} 초과: 판정 {over['judged_above']}점, 참고 {over['partial_above']}점, 최대 {over['max_value']:.2f}")
+            if over['judged_below'] or over['partial_below']:
+                notes.append(f"▼ {low:g} 미만: 판정 {over['judged_below']}점, 참고 {over['partial_below']}점, 최소 {over['min_value']:.2f}")
+            if notes:
+                ax.text(0.02, 0.03, '\n'.join(notes), transform=ax.transAxes, ha='left', va='bottom', fontsize=6.5,
+                        color=ink, bbox={'facecolor': 'white', 'edgecolor': 'none', 'alpha': 0.8, 'pad': 1})
             ax.axhline(threshold, color=muted, linewidth=0.8, linestyle='--')
             ax.axhline(1.0, color=muted, linewidth=0.6)
             status = h.recovery_status.iloc[0]
@@ -126,17 +163,20 @@ def plot_event(g, threshold, run, path, industries=PRIMARY):
             ax.spines[['top', 'right']].set_visible(False)
             ax.spines[['left', 'bottom']].set_color(grid)
             ax.tick_params(colors=muted, labelsize=7)
-            ax.set_ylim(0, 2)
+            ax.set_ylim(*Y_LIMITS)
         for ax in list(axes.flat)[len(present):]:
             ax.set_visible(False)
         fig.suptitle(event_caption(g, threshold, run) + '\n'
                      '회색 띠 = 사건 기간(마지막 사건일 = 0), x = 사건 종료 후 일수, 파란 실선 = 모든 연령이 갖춰진 날의 실제/예상 비율(판정에 사용), '
-                     '회색 점 = 일부 연령만 있는 날(참고용), 점선 = 회복 기준, 주황 실선/점선 = 회복 첫날/연속 확인 완료일, 세로 점선 = 공휴일',
+                     '회색 점 = 일부 연령만 있는 날(참고용)\n'
+                     '점선 = 회복 기준, 주황 실선/점선 = 회복 첫날/연속 확인 완료일, 세로 점선 = 공휴일, '
+                     f'▲/▼ = 세로축({Y_LIMITS[0]:g}~{Y_LIMITS[1]:g}) 밖 값(패널에 건수·최대값 표시)',
                      x=0.01, ha='left', fontsize=8.5, color=ink)
         fig.tight_layout()
         path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path, dpi=140)
         plt.close(fig)
+    return pd.DataFrame(overflow)
 
 
 def main():
@@ -153,8 +193,15 @@ def main():
     data, threshold, run = panel_data(pd.read_csv(args.curves), pd.read_csv(args.metrics))
     args.output.mkdir(parents=True, exist_ok=True)
     data.to_csv(args.output / 'final_recovery_curves_PRIVATE_REVIEW_ONLY.csv', index=False, encoding='utf-8-sig')
+    overflow = []
     for event, g in data.groupby('event_id'):
-        plot_event(g, threshold, run, args.output / f'final_recovery_curves_{event}.png')
+        panels = plot_event(g, threshold, run, args.output / f'final_recovery_curves_{event}.png')
+        overflow.append(panels.assign(event_id=event))
+    overflow = pd.concat(overflow, ignore_index=True)
+    overflow.to_csv(args.output / 'axis_overflow_PRIVATE_REVIEW_ONLY.csv', index=False, encoding='utf-8-sig')
+    hidden = overflow[['judged_above', 'judged_below', 'partial_above', 'partial_below']].sum()
+    print(f"panels with values outside {Y_LIMITS}: {int((overflow[hidden.index].sum(axis=1) > 0).sum())}; "
+          f"judged {int(hidden.judged_above + hidden.judged_below)}, partial {int(hidden.partial_above + hidden.partial_below)} points (marked)")
     print(f'{data.event_id.nunique()} events, {data.industry.nunique()} industries; figures in {args.output}')
 
 
