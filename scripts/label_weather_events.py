@@ -83,20 +83,33 @@ EVENT_COLUMNS = [
     'baseline_start', 'baseline_end', 'observation_start', 'observation_end']
 
 
-def group_events(df):
+def scenario_days(max_gap_days=None, observation_days=None):
+    """민감도 시나리오의 병합 간격·관찰일수. 지정하지 않으면 모듈 기본값(MAX_GAP_DAYS, OBSERVATION_DAYS)."""
+    gap = MAX_GAP_DAYS if max_gap_days is None else max_gap_days
+    observe = OBSERVATION_DAYS if observation_days is None else observation_days
+    if isinstance(gap, bool) or not isinstance(gap, int) or gap < 0:
+        raise ValueError('max_gap_days must be a non-negative integer')
+    if isinstance(observe, bool) or not isinstance(observe, int) or observe < 1:
+        raise ValueError('observation_days must be a positive integer')
+    return gap, observe
+
+
+def group_events(df, max_gap_days=None, observation_days=None):
     """같은 유형 사건일을 묶는다. 유형별로 따로 묶으며 강한 폭염은 폭염의 부분집합이다.
 
-    사건일 사이 비사건일이 MAX_GAP_DAYS 이하이면 같은 사건으로 병합한다
+    사건일 사이 비사건일이 max_gap_days(기본 MAX_GAP_DAYS) 이하이면 같은 사건으로 병합한다
     (예: 7/23, 7/26 → 사이 비사건일 2일 → 한 사건 7/23~7/26).
+    observation_days(기본 OBSERVATION_DAYS)는 명목 관찰기간 길이다. 두 값은 민감도 시나리오용이다.
     """
+    gap, observe = scenario_days(max_gap_days, observation_days)
     start, end = map(pd.Timestamp, PERIOD)
     rows = []
     for flag, prefix, label, value in EVENT_TYPES:
         days = df.loc[df[flag].fillna(False).astype(bool), ['date', value]].sort_values('date')
         if days.empty:
             continue
-        # 직전 사건일과의 날짜 차이가 MAX_GAP_DAYS + 1을 넘으면 새 사건 시작
-        days['run'] = days.date.diff().dt.days.gt(MAX_GAP_DAYS + 1).cumsum()
+        # 직전 사건일과의 날짜 차이가 gap + 1을 넘으면 새 사건 시작
+        days['run'] = days.date.diff().dt.days.gt(gap + 1).cumsum()
         for n, (_, run) in enumerate(days.groupby('run'), 1):
             s, e = run.date.min(), run.date.max()
             rows.append({
@@ -105,9 +118,9 @@ def group_events(df):
                 'event_days': len(run),              # 실제 기준을 넘은 날 수
                 'peak_value': run[value].max(), 'peak_variable': value,
                 'baseline_start': s - pd.Timedelta(days=BASELINE_DAYS), 'baseline_end': s - pd.Timedelta(days=1),
-                'observation_start': e + pd.Timedelta(days=1), 'observation_end': e + pd.Timedelta(days=OBSERVATION_DAYS),
+                'observation_start': e + pd.Timedelta(days=1), 'observation_end': e + pd.Timedelta(days=observe),
             })
-    events = link_nested(pd.DataFrame(rows, columns=EVENT_COLUMNS), df)
+    events = link_nested(pd.DataFrame(rows, columns=EVENT_COLUMNS), df, observe)
     any_event = df.set_index('date').is_any_event
 
     def event_days(a, b):
@@ -131,8 +144,9 @@ def group_events(df):
     return events
 
 
-def link_nested(events, df):
+def link_nested(events, df, observation_days=None):
     """강한 폭염을 포함하는 폭염 사건(parent_event_id)을 찾고, 폭염 사건에 강한 폭염 일수를 남긴다."""
+    _, observe = scenario_days(observation_days=observation_days)
     events = events.copy()
     events['parent_event_id'] = None
     for child, parent in NESTED_TYPES.items():
@@ -144,7 +158,7 @@ def link_nested(events, df):
             # 회복은 부모 사건이 끝난 뒤부터 관찰한다 (부모 사건이 진행 중인 날을 관찰 +1일로 잡지 않음)
             events.loc[i, 'parent_event_id'] = hit.event_id.iloc[0]
             events.loc[i, 'observation_start'] = hit.end_date.iloc[0] + pd.Timedelta(days=1)
-            events.loc[i, 'observation_end'] = hit.end_date.iloc[0] + pd.Timedelta(days=OBSERVATION_DAYS)
+            events.loc[i, 'observation_end'] = hit.end_date.iloc[0] + pd.Timedelta(days=observe)
     severe = df.set_index('date').is_severe_heatwave
     heat = events.type == '폭염'
     events['severe_event_days'] = pd.NA
@@ -363,11 +377,11 @@ def summarize_counts(df, events):
     return counts
 
 
-def run(source, output, figure):
+def run(source, output, figure, max_gap_days=None, observation_days=None):
     df = pd.read_csv(source, parse_dates=['date'])
     columns, by_date = missing_report(df)
     df = add_features(df)
-    events = group_events(df)
+    events = group_events(df, max_gap_days, observation_days)
     windows = event_windows(events)
     counts = summarize_counts(df, events)
 
@@ -390,5 +404,10 @@ if __name__ == '__main__':
     parser.add_argument('--input', type=Path, default=Path('data/processed/weather.csv'))
     parser.add_argument('--output', type=Path, default=Path('data/processed/weather_events'))
     parser.add_argument('--figure', type=Path, default=Path('outputs/weather_event_timeline.png'))
+    # 민감도 시나리오용 (#11). 기본값은 현재 기준과 같다.
+    parser.add_argument('--max-gap-days', type=int, default=MAX_GAP_DAYS,
+                        help=f'같은 유형 사건일 사이 병합할 최대 비사건일 수 (기본 {MAX_GAP_DAYS})')
+    parser.add_argument('--observation-days', type=int, default=OBSERVATION_DAYS,
+                        help=f'사건 종료 후 명목 관찰기간 일수 (기본 {OBSERVATION_DAYS})')
     args = parser.parse_args()
-    run(args.input, args.output, args.figure)
+    run(args.input, args.output, args.figure, args.max_gap_days, args.observation_days)
