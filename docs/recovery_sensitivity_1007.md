@@ -256,7 +256,7 @@ python scripts/compare_recovery_scenarios.py   # 기본: S0~S4 × 임계 0.90/0.
 (bash에서 실행한다. zsh는 `set -- $s`에서 단어를 나누지 않는다.)
 
 - `label_weather_events.py`의 새 옵션 `--max-gap-days`, `--observation-days`는 기본값이 기존 상수(2, 14)와 같다. 기본 실행의 사건·창·일별·요약 CSV와 타임라인 PNG가 main과 바이트 단위로 같음을 확인했다.
-- 출력: `status_distribution.csv`, `reference_changes.csv`, `reference_transitions.csv`, `stability.csv`, `recovery_day_range.csv`, `shortfall_changes.csv`, `recovery_vs_shortfall.csv`, `scenario_event_windows.csv`(시나리오별 사건의 실제 관찰기간), `sensitivity_summary.md`(건수만), `*_PRIVATE_REVIEW_ONLY.csv`(업종별 행, 비공개: 단위별 회복 지표, 단위별 설정 간 상태 변화 `unit_status_changes_PRIVATE_REVIEW_ONLY.csv` 등). 회복 지표의 `observation_days`는 절단 후 실제 관찰일수이고, `nominal_observation_days`는 시나리오의 명목 길이다.
+- 출력: `status_distribution.csv`, `reference_changes.csv`, `reference_transitions.csv`, `stability.csv`, `recovery_day_range.csv`, `shortfall_changes.csv`, `recovery_vs_shortfall.csv`, `scenario_event_windows.csv`(시나리오별 사건의 실제 관찰기간), `sensitivity_summary.md`(건수만), `*_PRIVATE_REVIEW_ONLY.csv`(업종별 행, 비공개: 단위별 회복 지표, 단위별 설정 간 상태 변화 `unit_status_changes_PRIVATE_REVIEW_ONLY.csv` 등. 기준(S0)과 대응되지 않는 병합 사건은 `has_reference = False`이고 기준 대비 차이 횟수를 공란으로 둔다). 회복 지표의 `observation_days`는 절단 후 실제 관찰일수이고, `nominal_observation_days`는 시나리오의 명목 길이다.
 - 테스트: `tests/test_recovery_scenarios.py`. 옵션 기본값 회귀, 간격 병합, 관찰기간 길이·절단, 상태 변화 집계, 유지 비율, 회복일 범위, 순누적 부족 부호·계산 가능 여부 변화, 회복 상태별 순부족 집계를 가상자료로 검사한다.
 
 ## 팀 합의가 필요한 것

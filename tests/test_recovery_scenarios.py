@@ -133,6 +133,11 @@ class ComparisonTests(unittest.TestCase):
         merged = out.loc[('A', 'ALL', '2025-08-07')]
         self.assertTrue(pd.isna(merged.reference_status))
         self.assertEqual(merged['S3|0.95|3'], 'insufficient_data')
+        # 기준이 없으면 비교 불가: 차이 횟수는 공란(0도, 설정 수도 아님), 설정 수·상태는 유지
+        self.assertFalse(merged.has_reference)
+        self.assertTrue(pd.isna(merged.settings_differing_from_reference))
+        self.assertEqual((merged.settings, merged.distinct_statuses), (1, 1))
+        self.assertTrue(out.loc[('A', 'ALL', '2025-08-03'), 'has_reference'])
 
     def test_recovery_day_range_uses_recovered_rows_only(self):
         days = sc.recovery_day_range(self.grid()).set_index(sc.SETTING + ['scope'])

@@ -213,7 +213,10 @@ def unit_changes(grid, reference):
     out['reference_recovery_days'] = ref.recovery_days.reindex(wide.index)
     out['settings'] = wide.notna().sum(axis=1)
     out['distinct_statuses'] = wide.nunique(axis=1)
-    out['settings_differing_from_reference'] = wide.ne(out.reference_status, axis=0).where(wide.notna()).sum(axis=1)
+    # 기준 상태가 없는 단위(병합 사건 등)는 비교 불가: 차이 횟수를 0이 아니라 공란으로 둔다.
+    out['has_reference'] = out.reference_status.notna()
+    differing = wide.ne(out.reference_status, axis=0).where(wide.notna()).sum(axis=1)
+    out['settings_differing_from_reference'] = differing.where(out.has_reference).astype('Int64')
     out['statuses_seen'] = wide.apply(lambda row: ', '.join(sorted(set(row.dropna()))), axis=1)
     return out.join(wide).reset_index()
 
