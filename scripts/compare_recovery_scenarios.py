@@ -260,17 +260,24 @@ def summary_markdown(distribution, changes, transitions, stable, days, unmatched
     return '\n'.join(parts)
 
 
-def main():
+DEFAULT_ROOT = Path('outputs/seeun_1005to1007')   # docs/recovery_sensitivity_1007.md의 재현 명령과 같은 경로
+
+
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--scenario-root', type=Path, default=Path('outputs/seeun_1005to1007/scenarios'))
+    parser.add_argument('--scenario-root', type=Path, default=DEFAULT_ROOT / 'scenarios')
     parser.add_argument('--scenarios', nargs='+',
                         default=['S0:2:14', 'S1:2:7', 'S2:2:21', 'S3:3:14', 'S4:3:21'],
                         help='NAME:GAP:DAYS, 폴더 이름 = NAME')
     parser.add_argument('--thresholds', nargs='+', type=float, default=[0.90, 0.95, 1.00])
     parser.add_argument('--runs', nargs='+', type=int, default=[2, 3, 4])
     parser.add_argument('--reference', nargs=3, default=['S0', '0.95', '3'], metavar=('SCENARIO', 'THRESHOLD', 'RUN'))
-    parser.add_argument('--output', type=Path, default=Path('outputs/seeun_1005to1007'))
-    args = parser.parse_args()
+    parser.add_argument('--output', type=Path, default=DEFAULT_ROOT)
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
     scenarios = [parse_scenario(s) for s in args.scenarios]
     reference = (args.reference[0], float(args.reference[1]), int(args.reference[2]))
     inputs = {name: load_scenario(args.scenario_root / name) for name, _, _ in scenarios}

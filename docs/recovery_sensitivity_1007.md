@@ -249,6 +249,8 @@ for s in "S0 2 14" "S1 2 7" "S2 2 21" "S3 3 14" "S4 3 21"; do
     --output outputs/seeun_1005to1007/scenarios/$1/baseline
 done
 python scripts/compare_recovery_scenarios.py   # 기본: S0~S4 × 임계 0.90/0.95/1.00 × 연속 2/3/4일
+# 위 기본 실행은 --scenario-root outputs/seeun_1005to1007/scenarios --output outputs/seeun_1005to1007 과 같다.
+# 시나리오 입력이 없으면 빠진 파일 경로를 담은 ValueError로 멈춘다.
 ```
 
 (bash에서 실행한다. zsh는 `set -- $s`에서 단어를 나누지 않는다.)

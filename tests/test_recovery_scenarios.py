@@ -59,6 +59,21 @@ class EventScenarioTests(unittest.TestCase):
             ev = lw.group_events(two, observation_days=days).set_index('event_id').loc['HEAT01']
             self.assertEqual((ev.observation_end_effective, ev.observation_days_effective), (D('2025-07-20'), 3))
 
+    def test_default_paths_match_documented_folder(self):
+        # 문서의 재현 명령이 만드는 폴더를 무인자 실행이 그대로 읽고 쓴다 (예전 seeun_1005to1011 폴더는 읽지 않음)
+        args = sc.build_parser().parse_args([])
+        self.assertEqual(args.scenario_root, Path('outputs/seeun_1005to1007/scenarios'))
+        self.assertEqual(args.output, Path('outputs/seeun_1005to1007'))
+        doc = (Path(__file__).parents[1] / 'docs' / 'recovery_sensitivity_1007.md').read_text(encoding='utf-8')
+        self.assertIn('--output outputs/seeun_1005to1007/scenarios/$1/baseline', doc)
+        self.assertNotIn('seeun_1005to1011', doc)
+
+    def test_missing_scenario_inputs_fail_with_paths(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, 'scenario inputs missing: .*weather_events.csv'):
+                sc.load_scenario(Path(tmp) / 'S0')
+
     def test_invalid_scenario_values_rejected(self):
         df = weather([20, 34, 20])
         with self.assertRaises(ValueError):
