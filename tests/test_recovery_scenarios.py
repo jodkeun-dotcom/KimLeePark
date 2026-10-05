@@ -107,6 +107,18 @@ class ComparisonTests(unittest.TestCase):
         dist = sc.status_distribution(grid).set_index(sc.SETTING + ['scope'])
         self.assertEqual(dist.loc[('S0', 0.95, 3, 'ALL'), ['censored', 'no_decline', 'total']].tolist(), [1, 1, 2])
 
+    def test_unit_changes_lists_settings(self):
+        out = sc.unit_changes(self.grid(), ('S0', 0.95, 3)).set_index(['industry', 'age', 'event_end'])
+        a = out.loc[('A', 'ALL', '2025-08-03')]
+        self.assertEqual((a.reference_status, a.settings, a.distinct_statuses), ('censored', 2, 2))
+        self.assertEqual(a.settings_differing_from_reference, 1)
+        self.assertEqual(a['S0|0.95|2'], 'recovered')
+        self.assertEqual(out.loc[('B', 'ALL', '2025-08-03'), 'settings_differing_from_reference'], 0)
+        # 병합 사건(종료일이 다름)은 기준 상태가 없고 S3 설정에만 나타난다
+        merged = out.loc[('A', 'ALL', '2025-08-07')]
+        self.assertTrue(pd.isna(merged.reference_status))
+        self.assertEqual(merged['S3|0.95|3'], 'insufficient_data')
+
     def test_recovery_day_range_uses_recovered_rows_only(self):
         days = sc.recovery_day_range(self.grid()).set_index(sc.SETTING + ['scope'])
         self.assertEqual(days.loc[('S0', 0.95, 2, 'ALL'), ['recovered', 'min_days', 'max_days']].tolist(), [1, 5, 5])
@@ -119,6 +131,9 @@ class ComparisonTests(unittest.TestCase):
         data = {'S0': (d, baseline.industry_daily(d), e, None)}
         grid = sc.recovery_grid(data, [('S0', 2, 14)], [0.9, 1.0], [1, 2])
         self.assertEqual(grid[sc.SETTING].drop_duplicates().shape[0], 4)
+        # 회귀: 실제 관찰일수(가상자료 1일)를 시나리오 명목 길이(14일)로 덮어쓰지 않는다
+        self.assertTrue(grid.observation_days.eq(1).all())
+        self.assertTrue(grid.scenario_observation_days.eq(14).all())
         self.assertEqual(set(grid.scope), {'ALL', 'age'})
         self.assertTrue(grid.recovery_status.isin(sc.STATUSES).all())
         with self.assertRaises(ValueError):
