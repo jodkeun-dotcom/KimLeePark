@@ -21,7 +21,7 @@ import compute_recovery_from_baseline as common
 import prepare_sales_handoff as sales
 
 STATUSES = ['no_decline', 'recovered', 'censored', 'insufficient_data']
-STATUS_KO = {'no_decline': '감소 없음', 'recovered': '회복', 'censored': '관찰기간 내 회복 미확인',
+STATUS_KO = {'no_decline': '사건 감소 기준 미충족', 'recovered': '회복', 'censored': '관찰기간 내 회복 미확인',
              'insufficient_data': '자료 부족'}
 # 같은 단위 대응 키: 사건 정의(시작·종료일)가 같은 업종×연령. 관찰 끝(window_end)은 시나리오가 바꾸는 값이라 제외한다.
 UNIT = ['event_id', 'region', 'industry', 'age', 'window_start', 'event_end']
