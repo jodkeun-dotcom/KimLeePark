@@ -37,3 +37,23 @@ __pycache__/
 .env*
 !.env.example
 .DS_Store
+
+# #11 민감도 시나리오 S0~S4: 공개 기상자료로 만든 사건 CSV 5종과 타임라인 PNG만 추적한다.
+# 각 단계에서 나머지를 먼저 제외하고 허용할 경로만 다시 연다. baseline/(카드 매출 금액),
+# 집계·PRIVATE CSV, ZIP, 다른 시나리오 폴더, 같은 폴더에 새로 생긴 다른 CSV는 모두 제외된다.
+!/outputs/
+/outputs/*
+!/outputs/seeun_1005to1007/
+/outputs/seeun_1005to1007/*
+!/outputs/seeun_1005to1007/scenarios/
+/outputs/seeun_1005to1007/scenarios/*
+!/outputs/seeun_1005to1007/scenarios/S[0-4]/
+/outputs/seeun_1005to1007/scenarios/S[0-4]/*
+!/outputs/seeun_1005to1007/scenarios/S[0-4]/weather_event_timeline.png
+!/outputs/seeun_1005to1007/scenarios/S[0-4]/weather_events/
+/outputs/seeun_1005to1007/scenarios/S[0-4]/weather_events/*
+!/outputs/seeun_1005to1007/scenarios/S[0-4]/weather_events/weather_events.csv
+!/outputs/seeun_1005to1007/scenarios/S[0-4]/weather_events/weather_event_windows.csv
+!/outputs/seeun_1005to1007/scenarios/S[0-4]/weather_events/weather_daily_events.csv
+!/outputs/seeun_1005to1007/scenarios/S[0-4]/weather_events/weather_event_counts.csv
+!/outputs/seeun_1005to1007/scenarios/S[0-4]/weather_events/weather_missing_by_date.csv

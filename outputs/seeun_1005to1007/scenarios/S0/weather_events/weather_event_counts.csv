@@ -1,0 +1,5 @@
+﻿type,events,event_days,statistical,case_study,excluded,judgeable,status
+폭염,5,21,0,3,2,True,"정식 비교 대상 없음 (사례연구 3건, 제외 2건)"
+강한 폭염,2,2,0,2,0,True,상위 사건의 강도 특성 - 정식 통계비교 제외
+호우,1,1,0,1,0,True,사례연구 후보 - 정식 통계비교 제외
+폭설,0,0,0,0,0,False,데이터 없음 - 분석 제외
