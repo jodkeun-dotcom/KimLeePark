@@ -4,11 +4,11 @@
 
 ## 준비
 
-저장소 루트에서 실행한다. Python 3.10 이상과 pandas가 필요하다.
+저장소 루트에서 실행한다. 결합 코드에는 Python 3.10 이상과 pandas가 필요하다. 아래 전체 테스트와 AI 평가까지 실행할 때는 requirements-analysis.txt를 설치한다.
 
 ```bash
 git pull --ff-only
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-analysis.txt
 python -m unittest discover -s tests -v
 ```
 
@@ -71,4 +71,4 @@ python scripts/join_data.py monthly \
 
 가상자료 검사 5개: 일별 행수·금액 보존 및 측정값 결측 유지, 중복 기상행 차단, 달력 누락 차단, 기상 날짜 누락 차단, 미확정 지역표 차단 및 확정표 결합.
 
-실제 기상·공휴일 자료 결합 검증과 춘천 지역코드 확정은 아직 대기 중이다. 팀원 자료를 로컬에 준비한 뒤 이 절차로 실행하고 결합 결과를 확인한다.
+2026-10-08 갱신: 실제 카드·기상·전체 달력의 날짜 결합 68,455행과 금액·공란 보존을 검증했다. [10일 재실행 기록](reproducibility_1010.md)에 버전·입력·실행 순서·대조 범위를 남겼다. SKT의 제공기관 지역코드 확인은 아직 대기 중이므로 위 monthly 명령의 confirmed 결합을 완료했다고 기록하지 않는다. 이번 월별 보조 비교는 compare_monthly.py에서 prefix 32010을 잠정 범위로 사용한 별도 실행이다.
