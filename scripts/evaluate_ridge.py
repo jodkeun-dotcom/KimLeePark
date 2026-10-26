@@ -31,7 +31,9 @@ def make_ridge(alpha):
 
 def metric(y, p):
     y, p = np.asarray(y, float), np.asarray(p, float)
-    if len(y) == 0 or not np.isfinite(y).all() or not np.isfinite(p).all():
+    if y.ndim != 1 or p.ndim != 1 or y.shape != p.shape:
+        raise ValueError('metrics require equal one-dimensional arrays')
+    if len(y) == 0 or not np.isfinite(y).all() or not np.isfinite(p).all() or (y < 0).any() or (p < 0).any():
         raise ValueError('empty or non-finite metrics')
     e = y-p
     return dict(rows=len(y), mae=float(np.abs(e).mean()), rmse=float(np.sqrt(np.mean(e**2))),
