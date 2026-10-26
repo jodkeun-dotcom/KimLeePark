@@ -63,4 +63,41 @@ class RegressionTests(unittest.TestCase):
         q,_=s.fit_predict('ridge_interactions',{'alpha':1.},train,target)
         np.testing.assert_allclose(p,q)
 
+class ReviewValidationTests(unittest.TestCase):
+    def test_metrics_reject_broadcasting(self):
+        with self.assertRaises(ValueError):r.metric([1,2],[[1],[2]])
+        with self.assertRaises(ValueError):r.metric([1,2],[1])
+        with self.assertRaises(ValueError):r.metric([-1],[1])
+
+    def test_saved_ridge_tampering_rejected(self):
+        train=sample();x=sample();x['comparison_eligible']=True;x['evaluation_status']='predicted'
+        x['baseline_prediction']=x.amount;x['ai_prediction']=x.amount
+        m=r.make_ridge(.01).fit(c.features(train),train.amount)
+        x['ridge_prediction']=np.maximum(m.predict(c.features(x)),0)
+        fresh=x.drop(columns='ridge_prediction')
+        s.validate_saved(x,fresh,train,.01)
+        changed=x.copy();changed.loc[0,'ridge_prediction']+=100
+        with self.assertRaises(ValueError):s.validate_saved(changed,fresh,train,.01)
+        changed=x.copy();changed.loc[0,'comparison_eligible']=False
+        with self.assertRaises(ValueError):s.validate_saved(changed,fresh,train,.01)
+
+    def test_saved_missing_key_rejected(self):
+        x=sample();x.loc[0,'industry']=None
+        with self.assertRaises(ValueError):s.validate_saved(x,x,sample(),1)
+
+    def test_paired_blocks_keep_zero_difference(self):
+        x=sample();x['baseline_prediction']=x.amount*0.9;x['same']=x.baseline_prediction
+        result=s.paired_daily_comparison(x,{'same':'same'},draws=40).iloc[0]
+        self.assertEqual(result.delta_wape_vs_mean,0)
+        self.assertEqual(result.resampling_p025,0)
+        self.assertEqual(result.resampling_p975,0)
+        self.assertEqual(result.valid_draws,40)
+
+    def test_resampling_reproducible(self):
+        x=sample();x['baseline_prediction']=x.amount*.9;x['other']=x.amount*.8
+        a=s.paired_daily_comparison(x,{'other':'other'},draws=40)
+        b=s.paired_daily_comparison(x,{'other':'other'},draws=40)
+        pd.testing.assert_frame_equal(a,b)
+        self.assertGreater(a.iloc[0].delta_wape_vs_mean,0)
+
 if __name__=='__main__':unittest.main()

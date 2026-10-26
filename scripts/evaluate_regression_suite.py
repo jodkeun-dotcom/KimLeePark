@@ -62,6 +62,48 @@ def fit_predict(name, params, train, target):
     return np.maximum(raw,0), int((raw<0).sum())
 
 
+def validate_saved(observed, fresh, train, alpha):
+    """Reject stale/tampered observed keys, eligibility, actuals, and predictions."""
+    if observed[KEY].isna().any().any() or observed.duplicated(KEY).any():
+        raise ValueError('invalid saved keys')
+    observed=observed.copy()
+    observed['comparison_eligible']=baseline.bool_column(observed.comparison_eligible,'comparison_eligible')
+    left=observed.set_index(KEY).sort_index();right=fresh.set_index(KEY).sort_index()
+    if not left.index.equals(right.index):raise ValueError('saved observation keys differ')
+    for col in ['amount','baseline_prediction','ai_prediction']:
+        if not np.allclose(left[col],right[col],rtol=1e-9,atol=1e-6,equal_nan=True):
+            raise ValueError('saved value differs: '+col)
+    for col in ['comparison_eligible','evaluation_status']:
+        if not left[col].equals(right[col]):raise ValueError('saved eligibility/status differs')
+    model=ridge.make_ridge(alpha).fit(common.features(train),train.amount)
+    eligible=observed.loc[observed.comparison_eligible]
+    expected=np.maximum(model.predict(common.features(eligible)),0)
+    if not np.allclose(expected,eligible.ridge_prediction,rtol=1e-9,atol=1e-6):
+        raise ValueError('saved Ridge prediction differs')
+    return observed
+
+
+def paired_daily_comparison(frame, prediction_columns, seed=42, draws=500):
+    """Descriptive paired moving-block resampling; not causal/population inference."""
+    days=pd.date_range(frame.date.min(),frame.date.max())
+    base=(frame.amount-frame.baseline_prediction).abs().groupby(frame.date).sum().reindex(days,fill_value=0).to_numpy()
+    totals=frame.amount.groupby(frame.date).sum().reindex(days,fill_value=0).to_numpy()
+    n=len(days);length=min(7,n);rng=np.random.default_rng(seed)
+    # All industries/ages on a date stay together; calendar-day blocks preserve short serial dependence.
+    starts=rng.integers(0,n-length+1,size=(draws,int(np.ceil(n/length))))
+    indices=(starts[:,:,None]+np.arange(length)[None,None,:]).reshape(draws,-1)[:,:n]
+    den=totals[indices].sum(axis=1);valid=den>0
+    rows=[]
+    for model,col in prediction_columns.items():
+        errors=(frame.amount-frame[col]).abs().groupby(frame.date).sum().reindex(days,fill_value=0).to_numpy()
+        delta=(errors[indices].sum(axis=1)-base[indices].sum(axis=1))[valid]/den[valid]
+        lo,hi=np.quantile(delta,[.025,.975]) if len(delta) else (np.nan,np.nan)
+        rows.append(dict(model=model,delta_wape_vs_mean=float((errors.sum()-base.sum())/totals.sum()) if totals.sum() else np.nan,
+                         resampling_p025=lo,resampling_p975=hi,block_days=length,draws=draws,valid_draws=int(valid.sum()),
+                         interpretation='descriptive fixed-prediction range; no selection/refit uncertainty'))
+    return pd.DataFrame(rows)
+
+
 def run(input_dir, ridge_dir, output, models=None):
     names = list(CANDIDATES) if models is None else list(models)
     if not names or len(set(names)) != len(names) or set(names) - set(CANDIDATES):
@@ -71,6 +113,8 @@ def run(input_dir, ridge_dir, output, models=None):
         raise ValueError('use new/empty output')
     output.mkdir(parents=True,exist_ok=True)
     protocol=json.loads((ridge_dir/'protocol.json').read_text())
+    if set(protocol.get('input_sha256',{})) != {'card','events','windows','calendar'}:
+        raise ValueError('incomplete input hash manifest')
     for key,sha in protocol['input_sha256'].items():
         if ridge.digest(input_dir/(key+'.csv'))!=sha:
             raise ValueError('changed input '+key)
@@ -85,10 +129,19 @@ def run(input_dir, ridge_dir, output, models=None):
     (output/'protocol.json').write_text(json.dumps(protocol,ensure_ascii=False,indent=2))
     card=baseline.validate_daily(pd.read_csv(input_dir/'card.csv',dtype={k:str for k in baseline.KEY}))
     events,_=baseline.load_events(input_dir/'events.csv',input_dir/'windows.csv')
-    selected={}; search=[]; scores=[]; audits=[]
+    selected={}; search=[]; scores=[]; audits=[]; coverages=[]; paired_ranges=[]
+    alpha=float(json.loads((ridge_dir/'frozen_selection.json').read_text())['alpha'])
+    if alpha not in ridge.ALPHAS:raise ValueError('unsupported frozen Ridge alpha')
     for split in ['validation','holdout']:
         train=ridge.training_rows(card,events,split,input_dir/'calendar.csv')
         observed=pd.read_csv(ridge_dir/f'{split}_predictions.csv',dtype={k:str for k in baseline.KEY},parse_dates=['date'])
+        forecast,_=common.forecast_split(card,events,split,input_dir/'calendar.csv')
+        fresh=common.attach_actuals(card,forecast,split)
+        observed=validate_saved(observed,fresh,train,alpha)
+        if split=='validation':
+            chosen,_=ridge.select_alpha(train,observed)
+            if chosen!=alpha:raise ValueError('saved alpha not validation optimum')
+        coverages.extend(common.coverage_rows(observed,split))
         common_rows=observed.loc[observed.comparison_eligible].copy()
         if common_rows.duplicated(KEY).any(): raise ValueError('duplicate cohort')
         # Median uses exactly the same training eligibility and grouping as mean.
@@ -118,7 +171,9 @@ def run(input_dir, ridge_dir, output, models=None):
             pd.DataFrame(search).to_csv(output/'validation_search.csv',index=False)
         models={'weekday_mean':'baseline_prediction','weekday_median':'median_prediction','hist_gradient_boosting':'ai_prediction','ridge':'ridge_prediction',
                 **{n:n+'_prediction' for n in candidates_by_model}}
-        for scope,col in [('overall',None),('industry','industry'),('age','age')]:
+        common_rows['month']=common_rows.date.dt.strftime('%Y-%m')
+        paired_ranges.append(paired_daily_comparison(common_rows,models).assign(split=split))
+        for scope,col in [('overall',None),('month','month'),('industry','industry'),('age','age')]:
             groups=[('all',common_rows)] if col is None else common_rows.groupby(col,sort=True)
             for group, frame in groups:
                 for model,predcol in models.items():
@@ -131,12 +186,14 @@ def run(input_dir, ridge_dir, output, models=None):
         for col in ['industry','age']:
             d=diag.groupby(col).agg(rows=('amount','size'),actual_sum=('amount','sum'),ridge_abs_error=('ridge_abs_error','sum'),mean_abs_error=('mean_abs_error','sum'),signed_error=('signed_error','sum'))
             d['excess_error']=d.ridge_abs_error-d.mean_abs_error
-            d['ridge_wape']=d.ridge_abs_error/d.actual_sum
-            d['mean_wape']=d.mean_abs_error/d.actual_sum
+            d['ridge_wape']=d.ridge_abs_error/d.actual_sum.where(d.actual_sum.ne(0))
+            d['mean_wape']=d.mean_abs_error/d.actual_sum.where(d.actual_sum.ne(0))
             d.sort_values('excess_error',ascending=False).to_csv(output/f'{split}_ridge_diagnostics_{col}.csv')
         common_rows.to_csv(output/f'{split}_predictions.csv',index=False)
     perf=pd.DataFrame(scores);perf.to_csv(output/'performance.csv',index=False)
     pd.DataFrame(audits).to_csv(output/'audit.csv',index=False)
+    pd.DataFrame(coverages).to_csv(output/'coverage.csv',index=False)
+    pd.concat(paired_ranges,ignore_index=True).to_csv(output/'paired_comparison.csv',index=False)
     print(perf.loc[perf.scope.eq('overall')].to_string(index=False),flush=True)
 
 
