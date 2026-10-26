@@ -1,0 +1,34 @@
+{
+  "joeun_report_1009_revised_20261009_v2.docx": {
+    "sha256": "f81bcf2a24858d89cf6dd10e8395f6a849be341d18384c339e77df5c495cad2b",
+    "bytes": 41318
+  },
+  "joeun_slides_1009_revised_20261009_v3.pptx": {
+    "sha256": "8900576675a675b3772a6912d3f799a82bda3e504056e1f06a8eff267c002128",
+    "bytes": 30952
+  },
+  "report_1009_recovery_v3.docx": {
+    "sha256": "7069a981658736ea809fc72261bd589b9b4e1c3aac1bcd1d9a07c1429287607b",
+    "bytes": 41493
+  },
+  "slides_1009_recovery_v3.pptx": {
+    "sha256": "0647c341ab079c5694ed96c8c3961be2994275ba4ddae5de93c5e0792ceabf4c",
+    "bytes": 216938
+  },
+  "support_action_plan_1009_revised_20261009_v2.docx": {
+    "sha256": "4e1efd4d5d696c29cdbf3f312c9c666cf0abb39538d965d51a245ab94f2eeaa8",
+    "bytes": 41403
+  },
+  "선하_보고서_1차수정_20261008.docx": {
+    "sha256": "550cce2a4511de9feb9231dc9cfe225ea008039ba4188a8dc7c1392711f00950",
+    "bytes": 40849
+  },
+  "선하_보고서_1차수정_20261008.pdf": {
+    "sha256": "d9dd6088763335f2dbacb519c78853891235569fcb79860ff6106ef94f229154",
+    "bytes": 116413
+  },
+  "선하_슬라이드_1차수정_20261008.pptx": {
+    "sha256": "1ad24c8aea487c67e8b3350b35e814e0588b3c1220b3f434cd94c2345e084233",
+    "bytes": 21150
+  }
+}
